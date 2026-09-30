@@ -878,8 +878,9 @@ export class ChatView extends LitElement {
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
       <details class=${chatMessageGroupClassName(defaultOpen)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event, defaultOpen); }}>
         <summary>
-          <b class="label">${chatMessageGroupLabel(defaultOpen)}</b>
-          <span>${summarizeChatGroup(messages)}</span>
+          <span class=${defaultOpen ? "event-indicator live" : "event-indicator"} aria-hidden="true"></span>
+          <b class="label visually-hidden">${chatMessageGroupLabel(defaultOpen)}</b>
+          <span class="event-summary">${summarizeChatGroup(messages)}</span>
         </summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
@@ -909,9 +910,10 @@ export class ChatView extends LitElement {
   private renderMessageHeader(message: ChatLine, key: string, label: string = message.role) {
     const meta = this.messageMetaLabel(message);
     const expanded = this.expandedMetaKey === key;
+    const conversational = message.role === "user" || message.role === "assistant";
     return html`
-      <div class="msg-header">
-        <b class="label">${label}</b>
+      <div class=${conversational ? "msg-header conversational" : "msg-header"}>
+        <b class=${conversational ? "label visually-hidden" : "label"}>${label}</b>
         <div class="msg-header-trailing">
           ${this.renderMessageActions(message, key)}
           <span class=${expanded ? "msg-meta expanded" : "msg-meta"} role="button" tabindex="0" title=${meta} aria-label=${meta} aria-expanded=${String(expanded)} @click=${() => { this.expandedMetaKey = expanded ? undefined : key; }} @keydown=${(event: KeyboardEvent) => { this.onMetaKeydown(event, key, expanded); }}>${meta}</span>

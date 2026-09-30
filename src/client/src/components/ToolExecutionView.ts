@@ -127,10 +127,10 @@ export class ToolExecutionView extends LitElement {
 
   static override styles = css`
     :host { display: block; width: 100%; max-width: 100%; min-width: 0; color: var(--pi-text); }
-    .tool-card { display: grid; gap: 8px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-bg); padding: 9px; color: var(--pi-text); }
-    .tool-card.running, .tool-card.pending { border-color: var(--pi-warning-border); background: var(--pi-warning-surface); }
-    .tool-card.success { border-color: var(--pi-success-border); background: var(--pi-success-bg); }
-    .tool-card.error { border-color: var(--pi-danger); background: color-mix(in srgb, var(--pi-danger) 10%, var(--pi-bg)); }
+    .tool-card { display: grid; gap: 7px; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; border: 0; border-left: 2px solid var(--pi-border-muted); border-radius: 0; background: transparent; padding: 5px 0 5px 10px; color: var(--pi-text); }
+    .tool-card.running, .tool-card.pending { border-left-color: var(--pi-warning); background: transparent; }
+    .tool-card.success { border-left-color: var(--pi-success); background: transparent; }
+    .tool-card.error { border-left-color: var(--pi-danger); background: transparent; }
     .tool-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
     .tool-title { flex: 1 1 auto; display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
     .status-icon { flex: 0 0 auto; color: var(--pi-muted); }
