@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly runtime_uid=1000
+readonly runtime_gid=1000
+readonly workspace_root=/data/workspaces
+readonly agent_dir=/data/pi-agent
+readonly config_file=/data/config/pi-web/config.json
+
+mkdir -p \
+  /data/home/.ssh \
+  /data/config/pi-web \
+  /data/pi-web \
+  "$agent_dir" \
+  "$workspace_root"
+chown -R "$runtime_uid:$runtime_gid" /data
+chmod 0700 /data/home/.ssh "$agent_dir"
+
+if [[ ! -f "$config_file" ]]; then
+  cat >"$config_file" <<'JSON'
+{
+  "host": "0.0.0.0",
+  "pathAccess": {
+    "allowedPaths": ["/data/workspaces"]
+  },
+  "spawnSessions": true,
+  "subsessions": true
+}
+JSON
+  chmod 0600 "$config_file"
+fi
+
+if [[ -n "${TOGETHER_API_KEY:-}" ]]; then
+  node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const agentDir = "/data/pi-agent";
+const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.2";
+
+function readObject(file) {
+  if (!fs.existsSync(file)) return {};
+  const value = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new Error(`${file} must contain a JSON object`);
+  }
+  return value;
+}
+
+function writePrivate(file, value) {
+  const temporary = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, file);
+  fs.chmodSync(file, 0o600);
+}
+
+const authFile = path.join(agentDir, "auth.json");
+const auth = readObject(authFile);
+auth.together = { type: "api_key", key: process.env.TOGETHER_API_KEY };
+writePrivate(authFile, auth);
+
+const settingsFile = path.join(agentDir, "settings.json");
+const settings = readObject(settingsFile);
+settings.defaultProvider = "together";
+settings.defaultModel = model;
+const selectedModel = `together/${model}`;
+const enabled = Array.isArray(settings.enabledModels)
+  ? settings.enabledModels.filter((entry) => entry !== "together/*")
+  : [];
+if (!enabled.includes(selectedModel)) enabled.push(selectedModel);
+settings.enabledModels = enabled;
+writePrivate(settingsFile, settings);
+NODE
+fi
+
+if [[ -n "${PI_WEB_GIT_DEPLOY_KEY_B64:-}" ]]; then
+  readonly key_file=/data/home/.ssh/pi-web-deploy-key
+  printf '%s' "$PI_WEB_GIT_DEPLOY_KEY_B64" | base64 --decode >"$key_file"
+  chmod 0600 "$key_file"
+
+  curl --fail --silent --show-error https://api.github.com/meta \
+    | jq -r '.ssh_keys[] | "github.com " + .' \
+    >/data/home/.ssh/known_hosts
+  chmod 0600 /data/home/.ssh/known_hosts
+
+  cat >/data/home/.ssh/config <<EOF
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile $key_file
+  IdentitiesOnly yes
+  UserKnownHostsFile /data/home/.ssh/known_hosts
+  StrictHostKeyChecking yes
+EOF
+  chmod 0600 /data/home/.ssh/config
+fi
+
+if [[ -n "${PI_WEB_GIT_REPOSITORY:-}" ]]; then
+  readonly workspace_name="${PI_WEB_WORKSPACE_NAME:-$(basename "${PI_WEB_GIT_REPOSITORY%.git}")}"
+  readonly workspace_path="$workspace_root/$workspace_name"
+  if [[ -d "$workspace_path/.git" ]]; then
+    existing_remote="$(git -C "$workspace_path" remote get-url origin)"
+    if [[ "$existing_remote" != "$PI_WEB_GIT_REPOSITORY" ]]; then
+      printf 'Existing workspace has unexpected origin: %s\n' "$existing_remote" >&2
+      exit 68
+    fi
+  else
+    if [[ -e "$workspace_path" ]]; then
+      printf 'Workspace path exists but is not a Git checkout: %s\n' "$workspace_path" >&2
+      exit 69
+    fi
+    if [[ -z "${PI_WEB_GIT_DEPLOY_KEY_B64:-}" ]]; then
+      printf '%s\n' 'PI_WEB_GIT_DEPLOY_KEY_B64 is required to clone PI_WEB_GIT_REPOSITORY' >&2
+      exit 70
+    fi
+    runuser --user pi-web -- git clone -- "$PI_WEB_GIT_REPOSITORY" "$workspace_path"
+  fi
+fi
+
+chown -R "$runtime_uid:$runtime_gid" /data
+chmod 0700 /data/home/.ssh "$agent_dir"
+
+# Provisioning inputs have been materialized into private files. Do not pass
+# their transport forms into the session daemon or agent child processes.
+unset TOGETHER_API_KEY PI_WEB_GIT_DEPLOY_KEY_B64
+
+exec setpriv \
+  --reuid="$runtime_uid" \
+  --regid="$runtime_gid" \
+  --init-groups \
+  /usr/local/bin/pi-web-railway-supervisor

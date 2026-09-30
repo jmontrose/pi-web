@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PI_WEB_PORT="${PORT:-8080}"
+
+sessiond_pid=""
+web_pid=""
+
+# Invoked by the signal/exit trap below.
+# shellcheck disable=SC2329
+terminate() {
+  trap - TERM INT EXIT
+  [[ -z "$web_pid" ]] || kill -TERM "$web_pid" 2>/dev/null || true
+  [[ -z "$sessiond_pid" ]] || kill -TERM "$sessiond_pid" 2>/dev/null || true
+  [[ -z "$web_pid" ]] || wait "$web_pid" 2>/dev/null || true
+  [[ -z "$sessiond_pid" ]] || wait "$sessiond_pid" 2>/dev/null || true
+}
+trap terminate TERM INT EXIT
+
+env \
+  -u PI_WEB_HTTP_USER \
+  -u PI_WEB_HTTP_PASSWORD \
+  -u PI_WEB_REQUIRE_HTTP_AUTH \
+  node /opt/pi-web/dist/server/sessiond.js &
+sessiond_pid=$!
+
+for ((attempt = 0; attempt < 120; attempt += 1)); do
+  if [[ -S "${PI_WEB_SESSIOND_SOCKET}" ]]; then
+    break
+  fi
+  if ! kill -0 "$sessiond_pid" 2>/dev/null; then
+    wait "$sessiond_pid"
+    exit $?
+  fi
+  sleep 0.25
+done
+
+if [[ ! -S "${PI_WEB_SESSIOND_SOCKET}" ]]; then
+  printf 'Session daemon did not create %s\n' "$PI_WEB_SESSIOND_SOCKET" >&2
+  exit 72
+fi
+
+node /opt/pi-web/dist/server/index.js &
+web_pid=$!
+
+set +e
+wait -n "$sessiond_pid" "$web_pid"
+status=$?
+set -e
+exit "$status"

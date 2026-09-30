@@ -41,6 +41,7 @@ import { installPluginBackendChannelWebSocketPayloadLimit } from "./webSocketBri
 import { registerPairedPluginBackendProxyRoutes } from "./plugins/pluginBackendProxyRoutes.js";
 import { proxyMachinePluginAsset, registerMachinePluginProxyRoutes } from "./machines/machinePluginProxyRoutes.js";
 import type { Project, WorkspaceEffectiveConfig, WorkspaceProviderResolution } from "./types.js";
+import { httpBasicAuthPolicy, registerHttpBasicAuth, type HttpBasicAuthPolicy } from "./httpBasicAuth.js";
 
 export interface AppDependencies {
   projects?: ProjectService;
@@ -58,6 +59,8 @@ export interface AppDependencies {
   logger?: FastifyServerOptions["logger"];
   /** Maximum accepted HTTP request body size in bytes. */
   bodyLimit?: number;
+  /** Optional trusted reverse-proxy-style gate for a directly exposed server. */
+  httpAuth?: HttpBasicAuthPolicy | false;
 }
 
 interface LocalProjectRouteOptions {
@@ -155,6 +158,7 @@ async function withProfileDependency<T>(reply: FastifyReply, operation: () => Pr
 
 export async function buildApp(deps: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? true, ...(deps.bodyLimit === undefined ? {} : { bodyLimit: deps.bodyLimit }) });
+  registerHttpBasicAuth(app, deps.httpAuth === false ? undefined : (deps.httpAuth ?? httpBasicAuthPolicy()));
   // Vite proxies development API requests here, while production and machine-scoped
   // API requests already terminate here, so this is the shared browser HTTP edge.
   await app.register(fastifyCompress, {
