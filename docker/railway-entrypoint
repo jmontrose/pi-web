@@ -106,6 +106,9 @@ fi
 if [[ -n "${PI_WEB_GIT_REPOSITORY:-}" ]]; then
   readonly workspace_name="${PI_WEB_WORKSPACE_NAME:-$(basename "${PI_WEB_GIT_REPOSITORY%.git}")}"
   readonly workspace_path="$workspace_root/$workspace_name"
+  if ! git config --global --get-all safe.directory | grep --fixed-strings --line-regexp --quiet -- "$workspace_path"; then
+    git config --global --add safe.directory "$workspace_path"
+  fi
   if [[ -d "$workspace_path/.git" ]]; then
     existing_remote="$(git -C "$workspace_path" remote get-url origin)"
     if [[ "$existing_remote" != "$PI_WEB_GIT_REPOSITORY" ]]; then
