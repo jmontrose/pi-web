@@ -68,6 +68,9 @@ describe("Docker command assets", () => {
     expect(profileIgnore).toContain("*");
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
+    expect(dockerfile).toContain("ARG PNPM_VERSION=11.22.0");
+    expect(dockerfile).toContain('corepack install --global "pnpm@${PNPM_VERSION}"');
+    expect(dockerfile).toContain('test "$(pnpm --version)" = "$PNPM_VERSION"');
     expect(dockerfile).toContain("PI_CODING_AGENT_DIR=/build/managed-agent");
     expect(dockerfile).toContain("COPY deploy/pi-profile /opt/pi-web-managed-profile");
     expect(entrypoint).toContain('install -m 0600 "$managed_profile_dir/AGENTS.md" "$managed_agents_file"');
