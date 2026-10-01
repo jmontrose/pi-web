@@ -16,6 +16,14 @@ mkdir -p \
 chown -R "$runtime_uid:$runtime_gid" /data
 chmod 0700 /data/home/.ssh "$agent_dir"
 
+if [[ -n "${PI_WEB_GIT_USER_NAME:-}" ]]; then
+  git config --global user.name "$PI_WEB_GIT_USER_NAME"
+fi
+
+if [[ -n "${PI_WEB_GIT_USER_EMAIL:-}" ]]; then
+  git config --global user.email "$PI_WEB_GIT_USER_EMAIL"
+fi
+
 if [[ ! -f "$config_file" ]]; then
   cat >"$config_file" <<'JSON'
 {

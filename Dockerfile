@@ -34,6 +34,7 @@ RUN npm run build
 FROM base AS runtime
 
 ENV HOME=/data/home \
+  GH_CONFIG_DIR=/data/config/gh \
   XDG_CONFIG_HOME=/data/config \
   PI_WEB_CONFIG=/data/config/pi-web/config.json \
   PI_WEB_DATA_DIR=/data/pi-web \
