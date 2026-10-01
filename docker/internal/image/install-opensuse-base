@@ -77,7 +77,7 @@ packages=(
   gh
   openssh-clients
   procps
-  tini
+  tini-static
   shadow
   gcc-c++
   make
@@ -123,6 +123,8 @@ if [ -n "$extra_zypper_packages" ]; then
 fi
 
 zypper --non-interactive install --no-recommends "${packages[@]}" "${extra_packages[@]}"
+
+test -x /usr/bin/tini-static
 
 node --version
 npm --version
