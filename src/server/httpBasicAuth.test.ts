@@ -32,7 +32,7 @@ describe("matchesBasicAuthorization", () => {
 });
 
 describe("registerHttpBasicAuth", () => {
-  it("protects application routes while leaving the state-free health probe available", async () => {
+  it("mints a durable cookie after Basic authentication while leaving the state-free health probe available", async () => {
     const app = Fastify({ logger: false });
     registerHttpBasicAuth(app, policy);
     app.get("/api/pi-web/health", () => ({ ok: true }));
@@ -41,17 +41,70 @@ describe("registerHttpBasicAuth", () => {
     const health = await app.inject({ method: "GET", url: "/api/pi-web/health" });
     expect(health.statusCode).toBe(200);
 
-    const denied = await app.inject({ method: "GET", url: "/private" });
+    const denied = await app.inject({
+      method: "GET",
+      url: "/private",
+      headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
+    });
     expect(denied.statusCode).toBe(401);
     expect(denied.headers["www-authenticate"]).toBe('Basic realm="PI WEB", charset="UTF-8"');
 
     const allowed = await app.inject({
       method: "GET",
       url: "/private",
-      headers: { authorization: `Basic ${Buffer.from("jesse:correct horse").toString("base64")}` },
+      headers: {
+        authorization: `Basic ${Buffer.from("jesse:correct horse").toString("base64")}`,
+        "x-forwarded-proto": "https",
+      },
     });
     expect(allowed.statusCode).toBe(200);
+    const cookie = allowed.headers["set-cookie"];
+    expect(cookie).toContain("pi_web_http_session=");
+    expect(cookie).toContain("Path=/");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
+    expect(cookie).toContain("Max-Age=2592000");
+    expect(cookie).toContain("Secure");
+
+    const requestCookie = (Array.isArray(cookie) ? cookie[0] : cookie)?.split(";", 1)[0];
+    const allowedByCookie = await app.inject({ method: "GET", url: "/private", headers: { cookie: requestCookie } });
+    expect(allowedByCookie.statusCode).toBe(200);
 
     await app.close();
+  });
+
+  it("denies background API requests without opening another Basic-auth challenge", async () => {
+    const app = Fastify({ logger: false });
+    registerHttpBasicAuth(app, policy);
+    app.get("/api/pi-web/status", () => ({ ok: true }));
+
+    const denied = await app.inject({ method: "GET", url: "/api/pi-web/status" });
+    expect(denied.statusCode).toBe(401);
+    expect(denied.headers["www-authenticate"]).toBeUndefined();
+
+    await app.close();
+  });
+
+  it("invalidates an existing session cookie when the configured credentials rotate", async () => {
+    const firstApp = Fastify({ logger: false });
+    registerHttpBasicAuth(firstApp, policy);
+    firstApp.get("/private", () => ({ secret: true }));
+    const signedIn = await firstApp.inject({
+      method: "GET",
+      url: "/private",
+      headers: { authorization: `Basic ${Buffer.from("jesse:correct horse").toString("base64")}` },
+    });
+    const cookie = signedIn.headers["set-cookie"];
+    expect(cookie).toBeDefined();
+    const requestCookie = (Array.isArray(cookie) ? cookie[0] : cookie)?.split(";", 1)[0];
+    await firstApp.close();
+
+    const rotatedApp = Fastify({ logger: false });
+    registerHttpBasicAuth(rotatedApp, { username: "jesse", password: "new horse" });
+    rotatedApp.get("/private", () => ({ secret: true }));
+    const denied = await rotatedApp.inject({ method: "GET", url: "/private", headers: { cookie: requestCookie } });
+    expect(denied.statusCode).toBe(401);
+
+    await rotatedApp.close();
   });
 });

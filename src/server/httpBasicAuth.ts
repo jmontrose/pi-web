@@ -1,5 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+
+const SESSION_COOKIE_NAME = "pi_web_http_session";
+const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export interface HttpBasicAuthPolicy {
   username: string;
@@ -25,12 +28,19 @@ export function registerHttpBasicAuth(app: FastifyInstance, policy: HttpBasicAut
     // Railway's deployment health probe cannot supply credentials. This route
     // reports process readiness only and exposes no application state.
     if (request.url === "/api/pi-web/health") return;
-    if (matchesBasicAuthorization(request.headers.authorization, policy)) return;
+    if (matchesSessionCookie(request.headers.cookie, policy)) return;
+    if (matchesBasicAuthorization(request.headers.authorization, policy)) {
+      reply.header("set-cookie", sessionCookie(policy, request));
+      return;
+    }
 
-    return reply
-      .header("www-authenticate", 'Basic realm="PI WEB", charset="UTF-8"')
-      .code(401)
-      .send({ error: "Authentication required" });
+    // Only a top-level document navigation should open the browser's native
+    // Basic-auth prompt. Polling APIs fail closed without queuing one prompt
+    // per request while the document is already waiting for credentials.
+    if (isDocumentNavigation(request)) {
+      reply.header("www-authenticate", 'Basic realm="PI WEB", charset="UTF-8"');
+    }
+    return reply.code(401).send({ error: "Authentication required" });
   });
 }
 
@@ -44,6 +54,44 @@ export function matchesBasicAuthorization(header: string | undefined, policy: Ht
     return false;
   }
   return safeEqual(decoded, `${policy.username}:${policy.password}`);
+}
+
+function matchesSessionCookie(header: string | undefined, policy: HttpBasicAuthPolicy): boolean {
+  const actual = header
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`))
+    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  return actual !== undefined && safeEqual(actual, sessionToken(policy));
+}
+
+function sessionCookie(policy: HttpBasicAuthPolicy, request: FastifyRequest): string {
+  const secure = request.protocol === "https" || forwardedProtocol(request) === "https";
+  return [
+    `${SESSION_COOKIE_NAME}=${sessionToken(policy)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${String(SESSION_COOKIE_MAX_AGE_SECONDS)}`,
+    ...(secure ? ["Secure"] : []),
+  ].join("; ");
+}
+
+function sessionToken(policy: HttpBasicAuthPolicy): string {
+  return createHmac("sha256", policy.password)
+    .update(`pi-web-http-session\0${policy.username}`)
+    .digest("base64url");
+}
+
+function forwardedProtocol(request: FastifyRequest): string | undefined {
+  const value = request.headers["x-forwarded-proto"];
+  return (Array.isArray(value) ? value[0] : value)?.split(",", 1)[0]?.trim().toLowerCase();
+}
+
+function isDocumentNavigation(request: FastifyRequest): boolean {
+  if (request.method !== "GET") return false;
+  if (request.headers["sec-fetch-mode"] === "navigate") return true;
+  return request.headers.accept?.split(",").some((value) => value.trim().split(";", 1)[0] === "text/html") ?? false;
 }
 
 function safeEqual(actual: string, expected: string): boolean {
