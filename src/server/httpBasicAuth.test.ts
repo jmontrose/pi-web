@@ -48,6 +48,7 @@ describe("registerHttpBasicAuth", () => {
     });
     expect(denied.statusCode).toBe(401);
     expect(denied.headers["www-authenticate"]).toBe('Basic realm="PI WEB", charset="UTF-8"');
+    expect(denied.headers["x-pi-web-auth"]).toBe("required");
 
     const allowed = await app.inject({
       method: "GET",
@@ -81,6 +82,7 @@ describe("registerHttpBasicAuth", () => {
     const denied = await app.inject({ method: "GET", url: "/api/pi-web/status" });
     expect(denied.statusCode).toBe(401);
     expect(denied.headers["www-authenticate"]).toBeUndefined();
+    expect(denied.headers["x-pi-web-auth"]).toBe("required");
 
     await app.close();
   });

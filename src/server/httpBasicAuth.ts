@@ -40,7 +40,10 @@ export function registerHttpBasicAuth(app: FastifyInstance, policy: HttpBasicAut
     if (isDocumentNavigation(request)) {
       reply.header("www-authenticate", 'Basic realm="PI WEB", charset="UTF-8"');
     }
-    return reply.code(401).send({ error: "Authentication required" });
+    return reply
+      .header("x-pi-web-auth", "required")
+      .code(401)
+      .send({ error: "Authentication required" });
   });
 }
 
