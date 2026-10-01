@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "installSource": "npm:pi-subagents@0.74.0",
+      "runtimeSource": "/opt/pi-web-managed-profile/npm/node_modules/pi-subagents",
+      "name": "pi-subagents",
+      "version": "0.74.0"
+    }
+  ]
+}

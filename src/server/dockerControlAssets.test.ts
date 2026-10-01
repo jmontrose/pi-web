@@ -42,8 +42,38 @@ describe("Docker command assets", () => {
       execUtf8("sh", ["-n", join(repoRoot, "docker", "install.sh")], process.env),
       execUtf8("sh", ["-n", join(repoRoot, "docker", "internal", "dev", "compose")], process.env),
       execUtf8("bash", ["-n", join(repoRoot, "docker", "internal", "dev", "sync-node-modules")], process.env),
+      execUtf8("bash", ["-n", join(repoRoot, "docker", "railway-entrypoint")], process.env),
       execUtf8("sh", ["-n", join(repoRoot, "docker", "internal", "host-profile.sh")], process.env),
     ]);
+  });
+
+  it("ships a non-secret managed Railway Pi profile with pinned subagents", async () => {
+    const [dockerfile, entrypoint, instructions, packagesText, profileIgnore] = await Promise.all([
+      readRepoFile("Dockerfile"),
+      readRepoFile("docker/railway-entrypoint"),
+      readRepoFile("deploy/pi-profile/AGENTS.md"),
+      readRepoFile("deploy/pi-profile/packages.json"),
+      readRepoFile("deploy/pi-profile/.gitignore"),
+    ]);
+    expect(JSON.parse(packagesText)).toEqual({
+      packages: [{
+        installSource: "npm:pi-subagents@0.74.0",
+        runtimeSource: "/opt/pi-web-managed-profile/npm/node_modules/pi-subagents",
+        name: "pi-subagents",
+        version: "0.74.0",
+      }],
+    });
+    expect(instructions).toContain("`pi-subagents` is installed");
+    expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
+    expect(profileIgnore).toContain("*");
+    expect(profileIgnore).not.toContain("auth.json");
+    expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
+    expect(dockerfile).toContain("PI_CODING_AGENT_DIR=/build/managed-agent");
+    expect(dockerfile).toContain("COPY deploy/pi-profile /opt/pi-web-managed-profile");
+    expect(entrypoint).toContain('install -m 0600 "$managed_profile_dir/AGENTS.md" "$managed_agents_file"');
+    expect(entrypoint).toContain("merge-managed-pi-profile.mjs");
+    expect(entrypoint).toContain("Runtime-owned Pi");
+    expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");
   });
 
   it("packages the canonical Docker command and internal support assets", async () => {

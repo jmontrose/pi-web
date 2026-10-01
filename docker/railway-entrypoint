@@ -6,15 +6,37 @@ readonly runtime_gid=1000
 readonly workspace_root=/data/workspaces
 readonly agent_dir=/data/pi-agent
 readonly config_file=/data/config/pi-web/config.json
+readonly managed_profile_dir=/opt/pi-web-managed-profile
 
 mkdir -p \
   /data/home/.ssh \
+  /data/home/.pi \
   /data/config/pi-web \
   /data/pi-web \
   "$agent_dir" \
   "$workspace_root"
 chown -R "$runtime_uid:$runtime_gid" /data
 chmod 0700 /data/home/.ssh "$agent_dir"
+
+readonly default_agent_link=/data/home/.pi/agent
+if [[ -L "$default_agent_link" ]]; then
+  if [[ "$(readlink "$default_agent_link")" != "$agent_dir" ]]; then
+    printf 'Unexpected Pi agent profile symlink target: %s\n' "$(readlink "$default_agent_link")" >&2
+    exit 71
+  fi
+elif [[ -e "$default_agent_link" ]]; then
+  printf 'Default Pi agent profile path exists and is not a symlink: %s\n' "$default_agent_link" >&2
+  exit 72
+else
+  ln -s "$agent_dir" "$default_agent_link"
+fi
+
+# This small, non-secret profile is owned by the deployment. Runtime-owned Pi
+# state (auth, sessions, trust, package caches, and extension state) remains on
+# the persistent volume and is deliberately not mirrored or removed here.
+managed_agents_file="$agent_dir/.AGENTS.md.tmp-$$"
+install -m 0600 "$managed_profile_dir/AGENTS.md" "$managed_agents_file"
+mv -f "$managed_agents_file" "$agent_dir/AGENTS.md"
 
 if [[ -n "${PI_WEB_GIT_USER_NAME:-}" ]]; then
   git config --global user.name "$PI_WEB_GIT_USER_NAME"
@@ -32,7 +54,7 @@ if [[ ! -f "$config_file" ]]; then
     "allowedPaths": ["/data/workspaces"]
   },
   "spawnSessions": true,
-  "subsessions": true
+  "subsessions": false
 }
 JSON
   chmod 0600 "$config_file"
@@ -80,6 +102,10 @@ settings.enabledModels = enabled;
 writePrivate(settingsFile, settings);
 NODE
 fi
+
+node /opt/pi-web/scripts/merge-managed-pi-profile.mjs \
+  "$managed_profile_dir/packages.json" \
+  "$agent_dir/settings.json"
 
 if [[ -n "${PI_WEB_GIT_DEPLOY_KEY_B64:-}" ]]; then
   readonly key_file=/data/home/.ssh/pi-web-deploy-key

@@ -30,6 +30,12 @@ RUN npm ci --min-release-age=0
 
 COPY . .
 RUN npm run build
+RUN managed_package_source="$(jq -r '.packages[0].installSource' deploy/pi-profile/packages.json)" \
+  && managed_package_version="$(jq -r '.packages[0].version' deploy/pi-profile/packages.json)" \
+  && PI_CODING_AGENT_DIR=/build/managed-agent \
+    ./node_modules/.bin/pi install "$managed_package_source" \
+  && installed_package_version="$(node -p 'require("/build/managed-agent/npm/node_modules/pi-subagents/package.json").version')" \
+  && test "$installed_package_version" = "$managed_package_version"
 
 FROM base AS runtime
 
@@ -42,7 +48,7 @@ ENV HOME=/data/home \
   PI_CODING_AGENT_DIR=/data/pi-agent \
   PI_WEB_HOST=0.0.0.0 \
   PI_WEB_SPAWN_SESSIONS=true \
-  PI_WEB_SUBSESSIONS=true \
+  PI_WEB_SUBSESSIONS=false \
   PI_WEB_REQUIRE_HTTP_AUTH=true \
   PI_WEB_DOCKER_RUNTIME=1 \
   PI_WEB_DOCKER_MODE=runtime \
@@ -55,6 +61,9 @@ WORKDIR /opt/pi-web
 COPY --from=build /build/package.json ./package.json
 COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/dist ./dist
+COPY deploy/pi-profile /opt/pi-web-managed-profile
+COPY --from=build /build/managed-agent/npm /opt/pi-web-managed-profile/npm
+COPY scripts/merge-managed-pi-profile.mjs /opt/pi-web/scripts/merge-managed-pi-profile.mjs
 COPY --chmod=0755 docker/railway-entrypoint /usr/local/bin/pi-web-railway-entrypoint
 COPY --chmod=0755 docker/railway-supervisor /usr/local/bin/pi-web-railway-supervisor
 

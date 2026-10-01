@@ -1,0 +1,8 @@
+*
+!.gitignore
+!AGENTS.md
+!README.md
+!packages.json
+!agents/
+!agents/*.md
+!agents/*.mjs
