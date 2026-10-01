@@ -64,4 +64,4 @@ EXPOSE 8080
 # Railway volumes are initially owned by root. The entrypoint initializes the
 # mount and then drops both long-lived processes to the unprivileged pi-web user.
 USER root
-ENTRYPOINT ["/usr/bin/tini-static", "--", "/usr/local/bin/pi-web-railway-entrypoint"]
+ENTRYPOINT ["/usr/sbin/tini-static", "--", "/usr/local/bin/pi-web-railway-entrypoint"]

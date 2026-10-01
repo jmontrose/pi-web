@@ -124,7 +124,7 @@ fi
 
 zypper --non-interactive install --no-recommends "${packages[@]}" "${extra_packages[@]}"
 
-test -x /usr/bin/tini-static
+test -x /usr/sbin/tini-static
 
 node --version
 npm --version
