@@ -32,7 +32,7 @@ describe("matchesBasicAuthorization", () => {
 });
 
 describe("registerHttpBasicAuth", () => {
-  it("mints a durable cookie after Basic authentication while leaving the state-free health probe available", async () => {
+  it("shows an explicit sign-in page and mints a durable cookie after Basic authentication", async () => {
     const app = Fastify({ logger: false });
     registerHttpBasicAuth(app, policy);
     app.get("/api/pi-web/health", () => ({ ok: true }));
@@ -46,9 +46,11 @@ describe("registerHttpBasicAuth", () => {
       url: "/private",
       headers: { accept: "text/html", "sec-fetch-mode": "navigate" },
     });
-    expect(denied.statusCode).toBe(401);
-    expect(denied.headers["www-authenticate"]).toBe('Basic realm="PI WEB", charset="UTF-8"');
-    expect(denied.headers["x-pi-web-auth"]).toBe("required");
+    expect(denied.statusCode).toBe(200);
+    expect(denied.headers["content-type"]).toContain("text/html");
+    expect(denied.headers["www-authenticate"]).toBeUndefined();
+    expect(denied.body).toContain("Sign in to PI WEB");
+    expect(denied.body).toContain('name="returnTo" value="/private"');
 
     const allowed = await app.inject({
       method: "GET",
@@ -70,6 +72,65 @@ describe("registerHttpBasicAuth", () => {
     const requestCookie = (Array.isArray(cookie) ? cookie[0] : cookie)?.split(";", 1)[0];
     const allowedByCookie = await app.inject({ method: "GET", url: "/private", headers: { cookie: requestCookie } });
     expect(allowedByCookie.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it("reports invalid form credentials instead of repeating a browser challenge", async () => {
+    const app = Fastify({ logger: false });
+    registerHttpBasicAuth(app, policy);
+
+    const denied = await app.inject({
+      method: "POST",
+      url: "/api/pi-web/http-auth/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({ username: "jesse", password: "wrong", returnTo: "/?session=123" }).toString(),
+    });
+
+    expect(denied.statusCode).toBe(200);
+    expect(denied.headers["www-authenticate"]).toBeUndefined();
+    expect(denied.headers["set-cookie"]).toBeUndefined();
+    expect(denied.body).toContain("Username or password is incorrect.");
+    expect(denied.body).toContain('name="returnTo" value="/?session=123"');
+
+    await app.close();
+  });
+
+  it("signs in through the form and safely returns to the requested page", async () => {
+    const app = Fastify({ logger: false });
+    registerHttpBasicAuth(app, policy);
+
+    const signedIn = await app.inject({
+      method: "POST",
+      url: "/api/pi-web/http-auth/login",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-forwarded-proto": "https",
+      },
+      payload: new URLSearchParams({
+        username: "jesse",
+        password: "correct horse",
+        returnTo: "/?project=abc&session=123",
+      }).toString(),
+    });
+
+    expect(signedIn.statusCode).toBe(303);
+    expect(signedIn.headers.location).toBe("/?project=abc&session=123");
+    expect(signedIn.headers["set-cookie"]).toContain("pi_web_http_session=");
+    expect(signedIn.headers["set-cookie"]).toContain("Secure");
+
+    const unsafeRedirect = await app.inject({
+      method: "POST",
+      url: "/api/pi-web/http-auth/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        username: "jesse",
+        password: "correct horse",
+        returnTo: "//example.com/steal-session",
+      }).toString(),
+    });
+    expect(unsafeRedirect.statusCode).toBe(303);
+    expect(unsafeRedirect.headers.location).toBe("/");
 
     await app.close();
   });
