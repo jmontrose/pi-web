@@ -113,7 +113,7 @@ if [[ -n "${PI_WEB_GIT_REPOSITORY:-}" ]]; then
       printf '%s\n' 'PI_WEB_GIT_DEPLOY_KEY_B64 is required to clone PI_WEB_GIT_REPOSITORY' >&2
       exit 70
     fi
-    runuser --user pi-web -- git clone -- "$PI_WEB_GIT_REPOSITORY" "$workspace_path"
+    git clone -- "$PI_WEB_GIT_REPOSITORY" "$workspace_path"
   fi
 fi
 
