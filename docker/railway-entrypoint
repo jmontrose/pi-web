@@ -7,6 +7,16 @@ readonly workspace_root=/data/workspaces
 readonly agent_dir=/data/pi-agent
 readonly config_file=/data/config/pi-web/config.json
 readonly managed_profile_dir=/opt/pi-web-managed-profile
+readonly ownership_marker=/data/.pi-web-runtime-owner
+readonly expected_ownership="v1:$runtime_uid:$runtime_gid"
+
+volume_ownership_is_current=false
+if [[ -f "$ownership_marker" ]] \
+  && [[ "$(cat "$ownership_marker")" == "$expected_ownership" ]]; then
+  volume_ownership_is_current=true
+else
+  printf '%s\n' 'Preparing persistent volume ownership (one-time scan)...'
+fi
 
 mkdir -p \
   /data/home/.ssh \
@@ -15,7 +25,9 @@ mkdir -p \
   /data/pi-web \
   "$agent_dir" \
   "$workspace_root"
-chown -R "$runtime_uid:$runtime_gid" /data
+if [[ "$volume_ownership_is_current" == false ]]; then
+  chown -R "$runtime_uid:$runtime_gid" /data
+fi
 chmod 0700 /data/home/.ssh "$agent_dir"
 
 readonly default_agent_link=/data/home/.pi/agent
@@ -129,6 +141,7 @@ EOF
   chmod 0600 /data/home/.ssh/config
 fi
 
+workspace_was_cloned=false
 if [[ -n "${PI_WEB_GIT_REPOSITORY:-}" ]]; then
   readonly workspace_name="${PI_WEB_WORKSPACE_NAME:-$(basename "${PI_WEB_GIT_REPOSITORY%.git}")}"
   readonly workspace_path="$workspace_root/$workspace_name"
@@ -152,11 +165,51 @@ if [[ -n "${PI_WEB_GIT_REPOSITORY:-}" ]]; then
     fi
     GIT_SSH_COMMAND="ssh -F /data/home/.ssh/config" \
       git clone -- "$PI_WEB_GIT_REPOSITORY" "$workspace_path"
+    workspace_was_cloned=true
   fi
 fi
 
-chown -R "$runtime_uid:$runtime_gid" /data
+# Startup runs as root so it can initialize a fresh Railway volume, but only a
+# small set of managed files is rewritten on an ordinary wake. Keep those files
+# accessible to the runtime user without walking every persisted workspace,
+# dependency cache, and session. A newly cloned workspace is the one exception.
+runtime_owned_paths=(
+  /data
+  /data/home
+  /data/home/.ssh
+  /data/home/.pi
+  /data/config
+  /data/config/pi-web
+  /data/pi-web
+  "$agent_dir"
+  "$workspace_root"
+  "$config_file"
+  "$agent_dir/AGENTS.md"
+  "$agent_dir/auth.json"
+  "$agent_dir/settings.json"
+  /data/home/.gitconfig
+  /data/home/.ssh/pi-web-deploy-key
+  /data/home/.ssh/known_hosts
+  /data/home/.ssh/config
+)
+existing_runtime_owned_paths=()
+for path in "${runtime_owned_paths[@]}"; do
+  if [[ -e "$path" || -L "$path" ]]; then
+    existing_runtime_owned_paths+=("$path")
+  fi
+done
+chown "$runtime_uid:$runtime_gid" "${existing_runtime_owned_paths[@]}"
+if [[ "$workspace_was_cloned" == true ]]; then
+  chown -R "$runtime_uid:$runtime_gid" "$workspace_path"
+fi
 chmod 0700 /data/home/.ssh "$agent_dir"
+
+# Write this only after provisioning succeeds. If the first startup is
+# interrupted, the next attempt safely repeats the migration scan.
+ownership_marker_tmp="$ownership_marker.tmp-$$"
+printf '%s\n' "$expected_ownership" >"$ownership_marker_tmp"
+chmod 0600 "$ownership_marker_tmp"
+mv -f "$ownership_marker_tmp" "$ownership_marker"
 
 # Provisioning inputs have been materialized into private files. Do not pass
 # their transport forms into the session daemon or agent child processes.
