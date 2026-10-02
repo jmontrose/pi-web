@@ -29,6 +29,10 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) selectedWorkspace?: Workspace;
   @property({ attribute: false }) sessions: SessionInfo[] = [];
   @property({ attribute: false }) selectedSession?: SessionInfo;
+  @property({ type: Boolean }) sessionsNavigationOnly = false;
+  @property({ attribute: false }) sessionContextLabel: (session: SessionInfo) => string | undefined = () => undefined;
+  @property({ type: Boolean }) sessionsLoading = false;
+  @property({ attribute: false }) sessionsWarning?: string;
   @property({ attribute: false }) sessionActivities: Record<string, SessionActivity> = {};
   @property({ attribute: false }) sessionStatuses: Record<string, SessionStatus> = {};
   @property({ attribute: false }) sendingPrompts: Record<string, true> = {};
@@ -195,6 +199,10 @@ export class AppNavigationPanel extends LitElement {
         .sending=${this.sendingPrompts}
         .unreadSessionIds=${this.unreadSessionIds}
         .selected=${this.selectedSession}
+        .navigationOnly=${this.sessionsNavigationOnly}
+        .contextLabel=${this.sessionContextLabel}
+        .loading=${this.sessionsLoading}
+        .catalogWarning=${this.sessionsWarning}
         .startingCount=${this.startingSessionCount}
         .canStart=${this.canStartSession}
         .collapsible=${this.collapsible}

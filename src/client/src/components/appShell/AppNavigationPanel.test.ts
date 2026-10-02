@@ -153,6 +153,23 @@ describe("stable list inputs", () => {
     await workspaces.updateComplete;
     expect(workspaces.shadowRoot?.textContent).toContain("Label for latest-workspace");
   });
+
+  it("forwards project-wide session presentation without changing the other lists", async () => {
+    const panel = await mountPanel({}, machine("local"));
+    const label = (item: SessionInfo) => `Workspace for ${item.id}`;
+    panel.sessionsNavigationOnly = true;
+    panel.sessionContextLabel = label;
+    panel.sessionsLoading = true;
+    panel.sessionsWarning = "One worktree could not be loaded.";
+    await panel.updateComplete;
+
+    const sessions = section(panel, "session-list", SessionList);
+    await sessions.updateComplete;
+    expect(sessions.navigationOnly).toBe(true);
+    expect(sessions.contextLabel).toBe(label);
+    expect(sessions.loading).toBe(true);
+    expect(sessions.catalogWarning).toBe("One worktree could not be loaded.");
+  });
 });
 
 function control(list: ProjectList | WorkspaceList | SessionList, selector: string): HTMLElement {

@@ -42,6 +42,11 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
   @property({ attribute: false }) sending: Record<string, true> = {};
   @property({ attribute: false }) unreadSessionIds: ReadonlySet<string> = new Set();
   @property({ attribute: false }) selected?: SessionInfo;
+  /** Read-only catalog mode keeps workspace-specific mutations out of a project-wide projection. */
+  @property({ type: Boolean }) navigationOnly = false;
+  @property({ attribute: false }) contextLabel: (session: SessionInfo) => string | undefined = () => undefined;
+  @property({ type: Boolean }) loading = false;
+  @property({ attribute: false }) catalogWarning?: string;
   @property({ type: Number }) startingCount = 0;
   @property({ type: Boolean }) canStart = false;
   @property({ type: Boolean, reflect: true }) collapsible = false;
@@ -165,14 +170,15 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
         ${this.renderHeading(currentRows.length + archivedRows.length, currentSelectableSessions, unreadCount)}
         ${this.collapsed ? null : html`
           <div class="list-body">
-            ${this.renderCurrentSelectionToolbar(currentSelectableSessions)}
+            ${this.navigationOnly ? null : this.renderCurrentSelectionToolbar(currentSelectableSessions)}
             ${this.startingCount > 0 ? this.renderStartingSession() : null}
-            ${repeat(currentRows, (row) => row.session.id, (row) => this.renderSession(row, descendantCounts?.get(row.session.id) ?? 0, "current"))}
+            ${this.renderCatalogNotice()}
+            ${repeat(currentRows, (row) => sessionRowKey(row.session), (row) => this.renderSession(row, descendantCounts?.get(row.session.id) ?? 0, "current"))}
             ${archivedRows.length > 0 ? html`
               ${this.renderArchivedHeading(archivedSessions)}
               ${this.archivedExpanded ? html`
-                ${this.renderArchivedSelectionToolbar(archivedSessions)}
-                ${repeat(archivedRows, (row) => row.session.id, (row) => this.renderSession(row, descendantCounts?.get(row.session.id) ?? 0, "archived"))}
+                ${this.navigationOnly ? null : this.renderArchivedSelectionToolbar(archivedSessions)}
+                ${repeat(archivedRows, (row) => sessionRowKey(row.session), (row) => this.renderSession(row, descendantCounts?.get(row.session.id) ?? 0, "archived"))}
               ` : null}
             ` : null}
           </div>
@@ -187,8 +193,8 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
         <h2>
           <span class="plain-heading">Sessions</span>
           ${this.renderUnreadCount(unreadCount)}
-          ${this.renderCurrentSelectionButton(currentSessions)}
-          ${this.renderCleanupButton()}
+          ${this.navigationOnly ? null : this.renderCurrentSelectionButton(currentSessions)}
+          ${this.navigationOnly ? null : this.renderCleanupButton()}
           ${this.renderStartButton()}
         </h2>
       `;
@@ -199,12 +205,17 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
       <h2>
         <button class="section-toggle" aria-expanded=${String(!this.collapsed)} @click=${() => { this.onToggleCollapsed?.(); }}><span class="section-title"><span class="section-name">${this.collapsed ? "▸" : "▾"} Sessions</span>${this.collapsed ? html`<small class="section-selected" dir="auto" title=${selectedTitle}>${selectedSummary}</small>` : null}</span></button>
         ${this.renderUnreadCount(unreadCount)}
-        ${this.renderCurrentSelectionButton(currentSessions)}
+        ${this.navigationOnly ? null : this.renderCurrentSelectionButton(currentSessions)}
         <small class="section-count">${sessionCount}</small>
-        ${this.renderCleanupButton()}
+        ${this.navigationOnly ? null : this.renderCleanupButton()}
         ${this.renderStartButton()}
       </h2>
     `;
+  }
+
+  private renderCatalogNotice() {
+    if (!this.loading && this.catalogWarning === undefined) return null;
+    return html`<p class=${this.catalogWarning === undefined ? "catalog-notice" : "catalog-notice warning"}>${this.catalogWarning ?? "Loading sessions across worktrees…"}</p>`;
   }
 
   private renderUnreadCount(unreadCount: number) {
@@ -305,7 +316,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     const { session } = row;
     const cappedDepth = Math.min(row.depth, 2);
     const canBulkSelect = sessionSelectionScope(session) === scope;
-    const selectionActive = this.selectionScopes.has(scope);
+    const selectionActive = !this.navigationOnly && this.selectionScopes.has(scope);
     const showsCheckbox = selectionActive && canBulkSelect;
     const bulkSelected = showsCheckbox && this.selectedSessionIds.has(session.id);
     const status = this.statuses[session.id];
@@ -316,7 +327,7 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     const canDeleteTransient = isTransientNewSessionInfo(session, status);
     return html`
       <div
-        class="action-row ${this.selected?.id === session.id ? "selected" : ""} ${bulkSelected ? "bulk-selected" : ""} ${session.archived === true ? "archived" : ""} ${selectionActive ? "selecting" : ""} ${unread ? "unread" : ""}"
+        class="action-row ${this.selected?.id === session.id && this.selected.cwd === session.cwd ? "selected" : ""} ${bulkSelected ? "bulk-selected" : ""} ${session.archived === true ? "archived" : ""} ${selectionActive ? "selecting" : ""} ${unread ? "unread" : ""}"
         style=${`--depth:${String(cappedDepth)}`}
         tabindex="0"
         title=${session.path}
@@ -325,10 +336,10 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
       >
         <div class="action-main ${selectionActive ? "selecting" : ""}">
           ${showsCheckbox ? html`<input class="session-checkbox" type="checkbox" aria-label=${`Select ${sessionLabel(session)}`} .checked=${bulkSelected} @click=${(event: MouseEvent) => { event.stopPropagation(); }} @change=${() => { this.toggleSelected(session.id); }}>` : null}
-          <span class="action-name-line"><span class="action-name" dir="auto">${this.renderRowMarker(row)}${sessionLabel(session)}</span>${this.renderRowBadges(row)}</span><small>${this.renderSessionMetaPrefix(session, status, activity)}${String(session.messageCount)} messages</small>
+          <span class="action-name-line"><span class="action-name" dir="auto">${this.renderRowMarker(row)}${sessionLabel(session)}</span>${this.renderRowBadges(row)}</span><small>${this.renderSessionMetaPrefix(session, status, activity)}${this.renderContextLabel(session)}${String(session.messageCount)} messages</small>
           ${this.renderActivity(indicatorKind, unread)}
         </div>
-        <div class="action-menu">
+        ${this.navigationOnly ? null : html`<div class="action-menu">
           <button class="action-menu-toggle" title="Session actions" @click=${(event: MouseEvent) => { event.stopPropagation(); this.toggleMenu(session.id, event.currentTarget); }}>⋯</button>
           ${this.openMenuSessionId === session.id ? html`
             <div class="action-menu-panel" style=${this.menuStyle}>
@@ -350,9 +361,14 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
                   `}
             </div>
           ` : null}
-        </div>
+        </div>`}
       </div>
     `;
+  }
+
+  private renderContextLabel(session: SessionInfo) {
+    const label = this.contextLabel(session);
+    return label === undefined || label === "" ? null : html`${label} · `;
   }
 
   /**
@@ -528,6 +544,8 @@ export class SessionList extends LitElement implements KeyboardNavigableSection 
     .row-badges .badge { margin-left: 0; white-space: nowrap; }
     /* Same glyph as a normal child marker, dimmed: the row is a child whose parent is not displayed here. */
     .orphan-marker { color: var(--pi-dim); opacity: .65; }
+    .catalog-notice { margin: 6px; color: var(--pi-muted); font-size: 12px; }
+    .catalog-notice.warning { color: var(--pi-warning, #c58a00); }
     .selection-toolbar { position: sticky; top: 0; z-index: 4; }
     .selection-toolbar::before { content: ""; position: absolute; top: 0; right: 0; left: 0; z-index: 0; height: 8px; background: var(--pi-bg); pointer-events: none; }
     .selection-toolbar .bulk-row.selecting { position: relative; z-index: 1; margin-bottom: 0; padding: 6px; border: 1px solid var(--pi-border-muted); border-radius: 8px; background: var(--pi-surface); box-shadow: ${scrollBoundaryShadow}; }
@@ -548,6 +566,10 @@ export function unreadSessionCount(
   unreadSessionIds: ReadonlySet<string>,
 ): number {
   return sessions.filter((session) => sessionRowUnread(session, unreadSessionIds)).length;
+}
+
+function sessionRowKey(session: SessionInfo): string {
+  return `${session.cwd}\u0000${session.id}`;
 }
 
 function sessionSelectionScope(session: SessionInfo): SessionSelectionScope {

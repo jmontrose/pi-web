@@ -5,7 +5,7 @@ import { markdownWorkspaceContext, type WorkspaceFileOpenRequest } from "../form
 import { configApi, effectiveWorkspaceAttachmentsFolder, effectiveWorkspaceUploadFolder, sessionsApi, workspacesApi, workspaceEffectiveAttachmentsFolder, workspaceEffectiveUploadFolder, type AskUserSubmission, type CommandOption, type ExtensionDialogAnswer, type Machine, type MachineHealth, type PiWebConfigValues, type PiWebShortcutConfig, type Project, type SessionCleanupExecuteResponse, type SessionCleanupPreviewResponse, type SessionCleanupRequest, type SessionInfo, type SessionModel, type SessionModelCatalogEntry, type SessionModelScopeMode, type SessionTreeForkResult, type SessionTreeNavigateResult, type SessionTreeSummaryChoice, type TerminalCommandRun, type Workspace } from "../api";
 import type { AppAction } from "../actions";
 import { initialAppState, type AppState, type ModelDialogOrigin } from "../appState";
-import { browserErrorContext, browserErrorScopeKey, BrowserErrorReporter, clearBrowserError, machineBrowserErrorScope, visibleBrowserErrors, workspaceBrowserErrorScope, type BrowserError, type BrowserErrorScope } from "../browserErrors";
+import { browserErrorContext, browserErrorScopeKey, BrowserErrorReporter, clearBrowserError, machineBrowserErrorScope, projectBrowserErrorScope, visibleBrowserErrors, workspaceBrowserErrorScope, type BrowserError, type BrowserErrorScope } from "../browserErrors";
 import { isSessionActive } from "../../../shared/activity";
 import { workspaceDeleteOperation } from "../../../shared/workspaceDeletion";
 import { PI_WEB_CAPABILITIES, supportsPiWebCapability } from "../../../shared/capabilities";
@@ -24,6 +24,7 @@ import { SessionStorageWorkspaceSelectionMemory } from "../controllers/workspace
 import { KeyboardShortcutDispatcher } from "../keyboardShortcuts";
 import { selectedMachineId, type NavigationDestinationOptions, type NavigationFreshness, type NavigationScope, type NavigationSelection } from "../controllers/types";
 import { machineSessionKey } from "../machineKeys";
+import { loadProjectSessionCatalog, projectSessionCatalogScope, projectSessionNavigationTarget, renameProjectSession, replaceWorkspaceSessions, upsertProjectSession, type ProjectSessionCatalogFailure } from "../projectSessionCatalog";
 import { HttpRequestError } from "../api/http";
 import { sessionCleanupRequestKey } from "../sessionCleanupUi";
 import { selectedNotificationView } from "../sessionNotifications";
@@ -158,6 +159,11 @@ export class PiWebApp extends LitElement {
     },
   });
   @state() private unreadSessionIds: ReadonlySet<string> = this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), this.state.sessions);
+  @state() private projectSessions: SessionInfo[] = [];
+  @state() private projectSessionsLoading = false;
+  @state() private projectSessionFailures: ProjectSessionCatalogFailure[] = [];
+  private projectSessionCatalogGeneration = 0;
+  private projectSessionCatalogScope = "";
   private unreadConnected = false;
   private committedChatIdentity: string | undefined;
   private readyChatIdentity: string | undefined;
@@ -459,6 +465,7 @@ export class PiWebApp extends LitElement {
   }
 
   override disconnectedCallback(): void {
+    this.projectSessionCatalogGeneration += 1;
     this.unreadConnected = false;
     this.committedChatIdentity = undefined;
     this.readyChatIdentity = undefined;
@@ -512,8 +519,56 @@ export class PiWebApp extends LitElement {
     this.handleActivityTransition(previous, this.state);
     this.handleWorkspaceChange(previous, this.state);
     this.handleMachineChange(previous, this.state);
+    this.syncProjectSessionCatalog(previous, this.state);
     if (machineActivitySubscriptionInputsChanged(previous, this.state)) this.syncMachineActivitySubscriptions();
     this.notifications.syncEnvironment(previous, this.state);
+  }
+
+  private syncProjectSessionCatalog(previous: AppState, next: AppState): void {
+    const machineId = selectedMachineId(next);
+    const scope = projectSessionCatalogScope(machineId, next.selectedProject?.id, next.workspaces, next.selectedWorkspace?.id);
+    if (scope !== this.projectSessionCatalogScope) {
+      this.projectSessionCatalogScope = scope;
+      this.projectSessions = next.selectedWorkspace === undefined
+        ? []
+        : replaceWorkspaceSessions([], next.selectedWorkspace, next.sessions.filter((session) => session.cwd === next.selectedWorkspace?.path));
+      void this.refreshProjectSessionCatalog(scope, machineId, next.selectedProject?.id, next.workspaces);
+      return;
+    }
+    if (previous.sessions === next.sessions || next.selectedWorkspace === undefined) return;
+    this.projectSessions = replaceWorkspaceSessions(this.projectSessions, next.selectedWorkspace, next.sessions);
+  }
+
+  private async refreshProjectSessionCatalog(
+    scope = this.projectSessionCatalogScope,
+    machineId = selectedMachineId(this.state),
+    projectId = this.state.selectedProject?.id,
+    workspaces = this.state.workspaces,
+  ): Promise<void> {
+    const generation = ++this.projectSessionCatalogGeneration;
+    if (projectId === undefined || workspaces.length === 0) {
+      this.projectSessions = [];
+      this.projectSessionFailures = [];
+      this.projectSessionsLoading = false;
+      return;
+    }
+    const selectedWorkspace = this.state.selectedWorkspace;
+    const workspacesToLoad = selectedWorkspace === undefined
+      ? workspaces
+      : workspaces.filter((workspace) => workspace.path !== selectedWorkspace.path);
+    this.projectSessionsLoading = workspacesToLoad.length > 0;
+    this.projectSessionFailures = [];
+    const snapshot = await loadProjectSessionCatalog(workspacesToLoad, (cwd) => sessionsApi.sessions(cwd, machineId));
+    if (generation !== this.projectSessionCatalogGeneration
+      || scope !== this.projectSessionCatalogScope
+      || selectedMachineId(this.state) !== machineId
+      || this.state.selectedProject?.id !== projectId) return;
+    const currentSelectedWorkspace = this.state.selectedWorkspace;
+    this.projectSessions = currentSelectedWorkspace === undefined
+      ? snapshot.sessions
+      : replaceWorkspaceSessions(snapshot.sessions, currentSelectedWorkspace, this.state.sessions.filter((session) => session.cwd === currentSelectedWorkspace.path));
+    this.projectSessionFailures = snapshot.failures;
+    this.projectSessionsLoading = false;
   }
 
   private async loadProjectsAndRestoreRoute() {
@@ -1308,8 +1363,21 @@ export class PiWebApp extends LitElement {
     return true;
   }
 
-  private selectSessionFromNavigation(session: SessionInfo): Promise<boolean> {
-    return this.navigateToSessionFromController(session);
+  private async selectSessionFromNavigation(session: SessionInfo): Promise<boolean> {
+    const target = projectSessionNavigationTarget(this.state.workspaces, session);
+    if (target === undefined) {
+      const project = this.state.selectedProject;
+      if (project !== undefined) this.browserErrors.report(projectBrowserErrorScope(selectedMachineId(this.state), project.id), `Workspace not found for session: ${session.cwd}`);
+      return false;
+    }
+    const current = machineNavigationSnapshotFromState(this.state, this.currentContributionQueryForState());
+    const destination: MachineNavigationSnapshot = {
+      ...current,
+      ...target,
+    };
+    if (!await this.commitAndRestoreNavigation(destination)) return false;
+    this.replaceNavigationUrl();
+    return true;
   }
 
   private async navigateToSessionFromController(session: SessionInfo | undefined, options: NavigationDestinationOptions = {}): Promise<boolean> {
@@ -1528,6 +1596,7 @@ export class PiWebApp extends LitElement {
       () => {
         // Live broadcasts are not replayed after a connection gap.
         void this.sessions.refreshCurrentWorkspaceSessions(machineId);
+        void this.refreshProjectSessionCatalog();
         void this.sessionUnread.refresh(machineId);
         void this.serverNotices.refresh(machineId);
       },
@@ -1576,7 +1645,23 @@ export class PiWebApp extends LitElement {
     if (event.type === "sessions.unread") this.sessionUnread.applyEvent(machineId, event);
     else if (event.type === "notices.updated") this.serverNotices.applyEvent(machineId, event);
     else if (event.type === "machine.status") this.machineStatus.apply(machineId, event.status);
-    else this.sessions.applyGlobalEvent(event);
+    else {
+      this.applyProjectSessionCatalogEvent(machineId, event);
+      this.sessions.applyGlobalEvent(event);
+    }
+  }
+
+  private applyProjectSessionCatalogEvent(machineId: string, event: Exclude<BrowserRealtimeEvent, { type: "sessions.unread" | "notices.updated" | "machine.status" }>): void {
+    if (machineId !== selectedMachineId(this.state)) return;
+    if (event.type === "session.created") {
+      if (this.state.workspaces.some((workspace) => workspace.path === event.session.cwd)) {
+        this.projectSessions = upsertProjectSession(this.projectSessions, event.session);
+      }
+      return;
+    }
+    if (event.type === "session.name") {
+      this.projectSessions = renameProjectSession(this.projectSessions, event.sessionId, event.name);
+    }
   }
 
   private handleActivityTransition(previous: AppState, next: AppState) {
@@ -1839,12 +1924,33 @@ export class PiWebApp extends LitElement {
 
   private workspaceDeletionInput: AppState["workspaceDeletionRuns"] | undefined;
   private deletingWorkspaceIds: string[] = [];
+  private readonly projectSessionContextLabel = (session: SessionInfo): string | undefined => {
+    const workspace = this.state.workspaces.find((candidate) => candidate.path === session.cwd);
+    if (workspace === undefined) return undefined;
+    return `${workspace.label}${workspace.isMain ? " · main" : ""}`;
+  };
+
+  private projectSessionCatalogWarning(): string | undefined {
+    const count = this.projectSessionFailures.length;
+    if (count === 0) return undefined;
+    return `${String(count)} ${count === 1 ? "worktree could" : "worktrees could"} not be loaded`;
+  }
+
+  private projectSessionNavigationActive(): boolean {
+    return this.state.selectedProject !== undefined && this.state.workspaces.length > 0;
+  }
+
+  private navigationSessions(): SessionInfo[] {
+    return this.projectSessionNavigationActive() ? this.projectSessions : this.state.sessions;
+  }
 
   private renderNavigationPanel() {
     if (this.workspaceDeletionInput !== this.state.workspaceDeletionRuns) {
       this.workspaceDeletionInput = this.state.workspaceDeletionRuns;
       this.deletingWorkspaceIds = pendingWorkspaceDeletionIds(this.state.workspaceDeletionRuns);
     }
+    const navigationSessions = this.navigationSessions();
+    const projectSessionNavigationActive = this.projectSessionNavigationActive();
     return html`
       <app-navigation-panel
         .machines=${this.state.machines}
@@ -1861,11 +1967,15 @@ export class PiWebApp extends LitElement {
         .workspaces=${this.state.workspaces}
         .selectedWorkspace=${this.state.selectedWorkspace}
         .deletingWorkspaceIds=${this.deletingWorkspaceIds}
-        .sessions=${this.state.sessions}
+        .sessions=${navigationSessions}
+        .sessionsNavigationOnly=${projectSessionNavigationActive}
+        .sessionContextLabel=${this.projectSessionContextLabel}
+        .sessionsLoading=${projectSessionNavigationActive && this.projectSessionsLoading}
+        .sessionsWarning=${projectSessionNavigationActive ? this.projectSessionCatalogWarning() : undefined}
         .sessionStatuses=${this.state.sessionStatuses}
         .sessionActivities=${this.state.sessionActivities}
         .sendingPrompts=${this.state.sendingPrompts}
-        .unreadSessionIds=${this.unreadSessionIds}
+        .unreadSessionIds=${this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), navigationSessions)}
         .selectedSession=${this.state.selectedSession}
         .startingSessionCount=${this.state.startingSessionCount}
         .canStartSession=${!!this.state.selectedWorkspace}
@@ -3463,7 +3573,11 @@ export class PiWebApp extends LitElement {
   }
 
   private mobileMainTabs(panels = this.visibleWorkspacePanels()): AppMobileMainTab[] {
-    const unreadCount = unreadSessionCount(this.state.sessions, this.unreadSessionIds);
+    const navigationSessions = this.navigationSessions();
+    const unreadCount = unreadSessionCount(
+      navigationSessions,
+      this.sessionUnread.unreadSessionIds(selectedMachineId(this.state), navigationSessions),
+    );
     return [
       {
         id: "navigation",

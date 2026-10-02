@@ -226,6 +226,29 @@ it("orders archived rows by activity immediately after archiving while preservin
   expect([...root.querySelectorAll<HTMLElement>(".action-row.archived")].map((row) => row.title)).toEqual([newer.path, old.path, child.path]);
 });
 
+it("renders a project-wide navigation catalog with worktree context and no mutation menus", async () => {
+  const main = session("main", { cwd: "/repo", path: "/repo/main.jsonl", firstMessage: "Main work" });
+  const feature = session("feature", { cwd: "/repo-feature", path: "/repo-feature/feature.jsonl", firstMessage: "Feature work" });
+  const onSelect = vi.fn();
+  const list = sessionList([main, feature], new Set());
+  list.navigationOnly = true;
+  list.contextLabel = (candidate) => candidate.cwd === "/repo" ? "main · main" : "feature/global-sessions";
+  list.onSelect = onSelect;
+  document.body.append(list);
+  await list.updateComplete;
+
+  const rows = [...(list.shadowRoot?.querySelectorAll<HTMLElement>(".action-row") ?? [])];
+  expect(rows.map((row) => row.textContent)).toEqual([
+    expect.stringContaining("main · main · 1 messages"),
+    expect.stringContaining("feature/global-sessions · 1 messages"),
+  ]);
+  expect(list.shadowRoot?.querySelector(".action-menu-toggle")).toBeNull();
+  expect(list.shadowRoot?.querySelector(".bulk-select-entry")).toBeNull();
+
+  rows[1]?.click();
+  expect(onSelect).toHaveBeenCalledWith(feature);
+});
+
 function rowSummaries(rows: ReturnType<typeof sessionRowsForCurrentTree>) {
   return rows.map((row) => ({ id: row.session.id, depth: row.depth, hasMissingParent: row.hasMissingParent }));
 }
