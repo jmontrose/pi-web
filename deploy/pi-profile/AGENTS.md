@@ -17,3 +17,17 @@ The hosted environment may not have every repository tool installed. Follow
 project instructions, but never claim an unavailable build, lint, or test gate
 passed. If a required tool is missing, report the exact missing capability and
 the verification that remains outstanding instead of inventing a workaround.
+
+# Resource discipline
+
+This is a persistent interactive workspace, not a CI runner. Prefer the
+smallest check that answers the task:
+
+- Do not build Falcon, run a full monorepo build, or install the complete
+  monorepo dependency closure unless the user's task specifically requires it.
+- Prefer package-scoped lint, typecheck, tests, and benchmarks. Reuse existing
+  artifacts when their provenance is adequate for the question.
+- If a broad build is genuinely necessary, explain why first and use the
+  repository's lowest practical concurrency (one worker for memory-heavy
+  TypeScript builds). Exit code 245 or a sudden memory spike is a reason to stop
+  and narrow the work, not to retry at full parallelism.

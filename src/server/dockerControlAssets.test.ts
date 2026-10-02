@@ -65,6 +65,8 @@ describe("Docker command assets", () => {
     });
     expect(instructions).toContain("`pi-subagents` is installed");
     expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
+    expect(instructions).toContain("Do not build Falcon, run a full monorepo build");
+    expect(instructions).toContain("one worker for memory-heavy");
     expect(profileIgnore).toContain("*");
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
