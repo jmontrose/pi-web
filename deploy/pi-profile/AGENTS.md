@@ -13,6 +13,14 @@ is worth the coordination overhead. Do not delegate trivial work.
 - Keep delegated tasks narrow, state their non-goals, and require concrete
   evidence in the result.
 
+# PR monitoring
+
+`pr-watch` is installed as a user agent with a `/pr-watch` prompt. Use
+`/pr-watch <pr> [deadline-sec]` to launch the background watcher after opening
+or updating a pull request. It wakes the parent for actionable review activity,
+CI failure, CI settlement, merge conflict, or deadline. After launching it,
+return control to the user; do not add a foreground polling loop.
+
 The hosted environment may not have every repository tool installed. Follow
 project instructions, but never claim an unavailable build, lint, or test gate
 passed. If a required tool is missing, report the exact missing capability and

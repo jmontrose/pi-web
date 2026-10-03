@@ -46,9 +46,24 @@ fi
 # This small, non-secret profile is owned by the deployment. Runtime-owned Pi
 # state (auth, sessions, trust, package caches, and extension state) remains on
 # the persistent volume and is deliberately not mirrored or removed here.
-managed_agents_file="$agent_dir/.AGENTS.md.tmp-$$"
-install -m 0600 "$managed_profile_dir/AGENTS.md" "$managed_agents_file"
-mv -f "$managed_agents_file" "$agent_dir/AGENTS.md"
+install_managed_profile_file() {
+  local source_file="$1"
+  local target_file="$2"
+  local temporary_file="$target_file.tmp-$$"
+  install -o "$runtime_uid" -g "$runtime_gid" -m 0600 "$source_file" "$temporary_file"
+  mv -f "$temporary_file" "$target_file"
+}
+
+install_managed_profile_file "$managed_profile_dir/AGENTS.md" "$agent_dir/AGENTS.md"
+for managed_subdirectory in agents prompts; do
+  managed_target_dir="$agent_dir/$managed_subdirectory"
+  install -d -o "$runtime_uid" -g "$runtime_gid" -m 0700 "$managed_target_dir"
+  while IFS= read -r -d '' managed_source_file; do
+    install_managed_profile_file \
+      "$managed_source_file" \
+      "$managed_target_dir/$(basename "$managed_source_file")"
+  done < <(find "$managed_profile_dir/$managed_subdirectory" -maxdepth 1 -type f -print0)
+done
 
 if [[ -n "${PI_WEB_GIT_USER_NAME:-}" ]]; then
   git config --global user.name "$PI_WEB_GIT_USER_NAME"

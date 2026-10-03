@@ -57,10 +57,10 @@ describe("Docker command assets", () => {
     ]);
     expect(JSON.parse(packagesText)).toEqual({
       packages: [{
-        installSource: "npm:pi-subagents@0.74.0",
+        installSource: "npm:pi-subagents@0.75.0",
         runtimeSource: "/opt/pi-web-managed-profile/npm/node_modules/pi-subagents",
         name: "pi-subagents",
-        version: "0.74.0",
+        version: "0.75.0",
       }],
     });
     expect(instructions).toContain("`pi-subagents` is installed");
@@ -75,7 +75,7 @@ describe("Docker command assets", () => {
     expect(dockerfile).toContain('test "$(pnpm --version)" = "$PNPM_VERSION"');
     expect(dockerfile).toContain("PI_CODING_AGENT_DIR=/build/managed-agent");
     expect(dockerfile).toContain("COPY deploy/pi-profile /opt/pi-web-managed-profile");
-    expect(entrypoint).toContain('install -m 0600 "$managed_profile_dir/AGENTS.md" "$managed_agents_file"');
+    expect(entrypoint).toContain('install_managed_profile_file "$managed_profile_dir/AGENTS.md" "$agent_dir/AGENTS.md"');
     expect(entrypoint).toContain("merge-managed-pi-profile.mjs");
     expect(entrypoint).toContain("Runtime-owned Pi");
     expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");

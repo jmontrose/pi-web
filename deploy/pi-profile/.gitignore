@@ -6,3 +6,5 @@
 !agents/
 !agents/*.md
 !agents/*.mjs
+!prompts/
+!prompts/*.md
