@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { localMarkdownImage } from "./markdownImages";
 import { toSafeMarkdownHtml } from "./markdown";
 import { MarkdownImage } from "../components/MarkdownImage";
+import { imagePresentation, settleImage } from "../components/imagePresentation.testSupport";
 
-afterEach(() => { document.body.replaceChildren(); localStorage.clear(); vi.unstubAllEnvs(); vi.useRealTimers(); });
+beforeEach(() => { vi.stubGlobal("IntersectionObserver", undefined); });
+afterEach(() => { document.body.replaceChildren(); localStorage.clear(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 function required<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error("Expected rendered image control");
@@ -22,15 +24,34 @@ it.each([
   expect(localMarkdownImage(input, "/srv/work")).toEqual({ path, outside });
 });
 
-it.each(["https://example.com/a.png", "//example.com/a.png", "data:image/png,x", "bad%ZZ.png", "a%00.png"])("does not interpret %s as a local file", (input) => {
-  expect(localMarkdownImage(input, "/srv/work")).toBeUndefined();
+it.each([
+  ["C:/work", "screenshots/a.png", "screenshots/a.png", false],
+  ["C:\\work", "screenshots/a.png", "screenshots/a.png", false],
+  ["C:\\work\\", "./screenshots/../a.png", "a.png", false],
+  ["C:/work", "../a%20b.png", "C:/a b.png", true],
+  ["C:\\work", "/outside/a.png", "C:/outside/a.png", true],
+  ["C:/", "../../a.png", "a.png", false],
+  ["C:/work", "C:/work/a.png", "a.png", false],
+  ["C:/work", "c:/work/a.png", "a.png", false],
+  ["C:/work", "D:/outside/a.png", "D:/outside/a.png", true],
+  ["\\\\server\\share\\work", "screenshots/a.png", "screenshots/a.png", false],
+  ["//server/share/work", "../a.png", "//server/share/a.png", true],
+  ["\\\\server\\share\\work", "../../../a.png", "//server/share/a.png", true],
+])("classifies %s image %s using the workspace's Windows path syntax", (root, input, path, outside) => {
+  expect(localMarkdownImage(input, root)).toEqual({ path, outside });
 });
 
-it("renders local images through machine-aware nested preview URLs without approving outside images", () => {
+it.each(["https://example.com/a.png", "//example.com/a.png", "data:image/png,x", "bad%ZZ.png", "a%00.png"])("does not interpret %s as a local file", (input) => {
+  for (const root of ["/srv/work", "C:/work", "\\\\server\\share\\work"]) {
+    expect(localMarkdownImage(input, root)).toBeUndefined();
+  }
+});
+
+it.each(["/srv/work", "C:/work", "C:\\work", "\\\\server\\share\\work"])("renders machine-aware nested preview URLs without approving outside images (%s)", (root) => {
   vi.stubEnv("BASE_URL", "/nested/pi/");
   const host = document.createElement("div");
   host.innerHTML = toSafeMarkdownHtml("![inside](a.png) ![outside](/tmp/a.png) ![external](https://example.com/a.png)", {
-    machineId: "remote /1", projectId: "p", workspaceId: "w", root: "/srv/work",
+    machineId: "remote /1", projectId: "p", workspaceId: "w", root,
   });
   const images = host.querySelectorAll("pi-web-markdown-image");
   const first = required(images[0]);
@@ -56,17 +77,17 @@ it("restores only a clicked image on revisit within the code-block intent lifeti
     host.innerHTML = toSafeMarkdownHtml(text, context, identity);
     document.body.append(host);
     const images = [...host.querySelectorAll<MarkdownImage>("pi-web-markdown-image")];
-    await Promise.all(images.map(async (image) => image.updateComplete));
+    await Promise.all(images.map(settleImage));
     return images;
   }
   function isShown(images: MarkdownImage[], index = 0): boolean {
-    return required(required(images[index]).shadowRoot).querySelector("img") !== null;
+    return imagePresentation(required(images[index])).renderRoot.querySelector("img") !== null;
   }
   const initial = await visit();
   expect(initial).toHaveLength(2);
   const first = required(initial[0]);
-  required(required(first.shadowRoot).querySelector("button")).click();
-  await first.updateComplete;
+  required(imagePresentation(first).renderRoot.querySelector("button")).click();
+  await settleImage(first);
   expect(isShown(initial)).toBe(true);
 
   vi.setSystemTime(14 * 60_000);
@@ -79,8 +100,8 @@ it("restores only a clicked image on revisit within the code-block intent lifeti
   const expired = await visit();
   expect(isShown(expired)).toBe(false);
   const again = required(expired[0]);
-  required(required(again.shadowRoot).querySelector("button")).click();
-  await again.updateComplete;
+  required(imagePresentation(again).renderRoot.querySelector("button")).click();
+  await settleImage(again);
   expect(isShown(await visit("![changed](/tmp/new.png)"))).toBe(false);
   expect(isShown(await visit())).toBe(false);
   expect(localStorage.length).toBe(0);
@@ -92,21 +113,23 @@ it("replaces the placeholder with just the image, reports failures, and resets a
   image.path = "/tmp/example.png";
   image.previewUrl = "https://example.com/preview";
   document.body.append(image);
-  await image.updateComplete;
-  const root = required(image.shadowRoot);
+  const presentation = await settleImage(image);
+  const root = presentation.renderRoot;
   expect(root.querySelector("img")).toBeNull();
   expect(root.textContent).toContain("/tmp/example.png");
-  const click = async () => { required(root.querySelector("button")).click(); await image.updateComplete; };
-  await click();
+  required(root.querySelector("button")).click();
+  await settleImage(image);
   expect(root.querySelector("img")?.src).toBe(image.previewUrl);
-  expect(root.querySelector("button")).toBeNull();
+  required(root.querySelector("img")).dispatchEvent(new Event("load"));
+  await presentation.updateComplete;
+  expect(root.querySelector(".placeholder")).toBeNull();
   expect(root.querySelector("code")).toBeNull();
   expect(root.textContent.trim()).toBe("");
   required(root.querySelector("img")).dispatchEvent(new Event("error"));
-  await image.updateComplete;
+  await presentation.updateComplete;
   expect(root.querySelector('[role="status"]')?.textContent).toContain("Image unavailable");
   image.previewUrl = "https://example.com/another";
-  await image.updateComplete;
+  await settleImage(image);
   expect(root.querySelector("img")).toBeNull();
   expect(required(root.querySelector("button")).textContent).toContain("Show image");
 });

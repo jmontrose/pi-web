@@ -28,7 +28,7 @@ describe("Railway entrypoint", () => {
     ]);
 
     expect(JSON.parse(packagesText)).toMatchObject({
-      packages: [{ name: "pi-subagents", version: "0.75.0" }],
+      packages: [{ name: "pi-subagents", version: "0.76.1" }],
     });
     expect(entrypoint).toContain("for managed_subdirectory in agents prompts");
     expect(entrypoint).toContain('install -o "$runtime_uid" -g "$runtime_gid" -m 0600');

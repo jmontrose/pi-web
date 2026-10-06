@@ -4,6 +4,7 @@ import { BrowserErrorReporter, sessionBrowserErrorScope, workspaceBrowserErrorSc
 import { forgetCachedNewSession, isCachedNewSessionInfo, markCachedNewSessionInfo, mergeCachedNewSessions, rememberCachedNewSession, stripCachedNewSessionMarker } from "../cachedNewSessions";
 import { textMessage } from "../chatMessages";
 import { machineSessionKey } from "../machineKeys";
+import { samePromptChipTarget, type PromptChipTarget } from "../promptChips";
 import { isCreatingSessionId } from "../route";
 import { clearDraft, moveDraft, saveDraft } from "../promptDraftStorage";
 import { clearStagedAttachments, moveStagedAttachments } from "../promptAttachmentStaging";
@@ -142,6 +143,7 @@ export class SessionController {
   private readonly beginNavigationOperation: SessionControllerDependencies["beginNavigationOperation"];
   private readonly browserErrors: BrowserErrorReporter;
   private selectionSeq = 0;
+  private readonly pendingTreeActions = new Set<{ machineId: string; sessionId: string }>();
   private disposed = false;
   // Join-time stream watermark for the selected session. `seq` is the
   // `SessionEventHub` sequence captured together with the seeded partial by the
@@ -326,7 +328,9 @@ export class SessionController {
       }
       this.socket.connect(
         session,
-        (event) => { this.applyEvent(event); },
+        (event) => {
+          if (this.isCurrentSessionSelection(session.id, machineId, seq)) this.applyEvent(event);
+        },
         () => { void this.refreshSelectedSession(session.id); },
         machineId,
         () => { void this.notifications?.refreshSelectedSession(session, machineId); },
@@ -380,40 +384,56 @@ export class SessionController {
     if (!session || state.isLoadingEarlierMessages || state.messagePageStart <= 0) return;
     const machineId = selectedMachineId(state);
     const errorOwner = this.captureSessionErrorOwner(session);
+    const selectionSeq = this.selectionSeq;
+    const key = machineSessionKey(machineId, session.id);
+    const historyRevision = this.transcripts.historyRevision(key);
+    const isCurrentSelection = (): boolean => selectionSeq === this.selectionSeq
+      && selectedMachineId(this.getState()) === machineId && this.getState().selectedSession?.id === session.id;
     this.setState({ isLoadingEarlierMessages: true });
     try {
       const page = await this.api.messages(session, { before: state.messagePageStart, limit: MESSAGE_PAGE_SIZE }, machineId);
-      if (this.getState().selectedSession?.id !== session.id) return;
-      const history = this.transcripts.mergeHistory(this.sessionCacheKey(session.id), page);
+      if (!isCurrentSelection() || this.transcripts.historyRevision(key) !== historyRevision) return;
+      const history = this.transcripts.mergeHistory(key, page);
       this.setState(history);
     } catch (error) {
       this.reportSessionError(session, machineId, error, errorOwner);
     } finally {
-      if (this.getState().selectedSession?.id === session.id) this.setState({ isLoadingEarlierMessages: false });
+      if (isCurrentSelection()) this.setState({ isLoadingEarlierMessages: false });
     }
   }
 
-  async send(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery: PromptAttachmentDelivery = "inline", folder?: string) {
-    const session = this.getState().selectedSession;
-    if (!session || session.archived === true) return;
+  async send(text: string, streamingBehavior?: "steer" | "followUp", attachments?: PromptAttachment[], delivery: PromptAttachmentDelivery = "inline", folder?: string, promptTarget?: PromptChipTarget): Promise<boolean> {
+    const state = this.getState();
+    const session = state.selectedSession;
+    if (!session || session.archived === true) return false;
+    // Chip-bearing sends are ordinary prompts addressed to their captured
+    // conversation. A local pending queue is not server acceptance.
+    if (promptTarget !== undefined && (!samePromptChipTarget(promptTarget, { machineId: selectedMachineId(state), sessionId: session.id }) || isClientPendingStartSessionInfo(session))) return false;
 
     const trimmed = text.trim();
     const hasAttachments = attachments !== undefined && attachments.length > 0;
+    const promptOnly = promptTarget !== undefined;
     if (isClientPendingStartSessionInfo(session)) {
       if (!hasAttachments && trimmed.startsWith("/")) this.enqueuePendingSessionSend(session, { type: "command", text });
       else if (!hasAttachments && isShellInput(text)) this.enqueuePendingSessionSend(session, { type: "shell", text });
       else this.enqueuePendingSessionSend(session, { type: "prompt", text, streamingBehavior, attachments, delivery, folder });
-      return;
+      return false;
     }
-    if (!hasAttachments && trimmed.startsWith("/")) return this.runCommand(text);
-    if (!hasAttachments && isShellInput(text)) return this.runShell(text);
+    if (!promptOnly && !hasAttachments && trimmed.startsWith("/")) {
+      await this.runCommand(text);
+      return false;
+    }
+    if (!promptOnly && !hasAttachments && isShellInput(text)) {
+      await this.runShell(text);
+      return false;
+    }
 
     // Capture the originating session/machine/context before any await so the
     // request, its sending indicator, and any failure stay bound to the right
     // session even if the user navigates elsewhere mid-upload.
     const machineId = selectedMachineId(this.getState());
     const errorOwner = this.captureSessionErrorOwner(session);
-    await this.deliverPromptToSession(session, text, streamingBehavior, attachments, delivery, folder, machineId, { markSending: hasAttachments }, errorOwner);
+    return this.deliverPromptToSession(session, text, streamingBehavior, attachments, delivery, folder, machineId, { markSending: hasAttachments || promptOnly }, errorOwner);
   }
 
   private markSendingPrompt(sessionId: string, sending: boolean): void {
@@ -609,17 +629,24 @@ export class SessionController {
 
     const machineId = selectedMachineId(state);
     const errorOwner = this.captureSessionErrorOwner(session);
-    const cacheKey = machineSessionKey(machineId, session.id);
-    let result: SessionTreeNavigateResult;
+    const pending = { machineId, sessionId: session.id };
+    this.pendingTreeActions.add(pending);
     try {
-      result = await this.api.navigateTree(session, { targetId, expectedLeafId: tree.activeLeafId, summary }, machineId);
+      const result = await this.api.navigateTree(session, { targetId, expectedLeafId: tree.activeLeafId, summary }, machineId);
+      await this.applySessionTreeNavigationResult(session, machineId, result, tree);
+      return result;
     } catch (error) {
       this.reportSessionError(session, machineId, error, errorOwner);
       throw error;
+    } finally {
+      this.pendingTreeActions.delete(pending);
     }
+  }
 
-    if (result.cancelled) return result;
+  private async applySessionTreeNavigationResult(session: SessionInfo, machineId: string, result: SessionTreeNavigateResult, tree?: SessionTreeSnapshot): Promise<void> {
+    if (result.cancelled) return;
 
+    const cacheKey = machineSessionKey(machineId, session.id);
     const editorText = result.editorText ?? "";
     saveDraft(cacheKey, editorText);
     this.transcripts.discard(cacheKey);
@@ -627,28 +654,22 @@ export class SessionController {
     // A user can reselect the same session while the request is in flight. Its
     // sequence changes, but the server mutation still belongs to the selected
     // identity and requires a fresh authoritative branch read.
-    if (!this.isSelectedSessionIdentity(session.id, machineId)) return result;
+    if (!this.isSelectedSessionIdentity(session.id, machineId)) return;
     this.clearPendingUpdates();
     let authoritativeRefreshFailure: { error: unknown } | undefined;
     try {
-      await this.selectSession(session, { updateUrl: false, preserveTreeDialog: true, propagateRefreshError: true });
+      // Keep the subscription and selection identity during same-session reads.
+      await this.requestSelectedSessionRefresh({
+        session, machineId, selectionSeq: this.selectionSeq, errorOwner: this.captureSessionErrorOwner(session),
+      });
     } catch (error) {
       authoritativeRefreshFailure = { error };
     }
-    if (!this.isSelectedSessionIdentity(session.id, machineId)) return result;
+    if (!this.isSelectedSessionIdentity(session.id, machineId)) return;
 
-    try {
-      await this.replacePromptEditorText?.({ machineId, sessionId: session.id, text: editorText });
-    } catch (error) {
-      this.reportSessionError(session, machineId, error, errorOwner);
-      throw error;
-    }
-    if (authoritativeRefreshFailure !== undefined) {
-      this.reportSessionError(session, machineId, authoritativeRefreshFailure.error, errorOwner);
-      throw authoritativeRefreshFailure.error;
-    }
+    await this.replacePromptEditorText?.({ machineId, sessionId: session.id, text: editorText });
+    if (authoritativeRefreshFailure !== undefined) throw authoritativeRefreshFailure.error;
     if (this.isSelectedSessionIdentity(session.id, machineId) && this.getState().treeDialog === tree) this.setState({ treeDialog: undefined });
-    return result;
   }
 
   async forkFromTree(entryId: string): Promise<SessionTreeForkResult> {
@@ -665,18 +686,31 @@ export class SessionController {
     const machineId = selectedMachineId(state);
     const errorOwner = this.captureSessionErrorOwner(session);
     const expected = this.navigationSelection();
-    const originalCacheKey = machineSessionKey(machineId, session.id);
-    let result: SessionTreeForkResult;
+    const pending = { machineId, sessionId: session.id };
+    this.pendingTreeActions.add(pending);
     try {
-      result = await this.api.forkTree(session, { entryId, expectedLeafId: tree.activeLeafId }, machineId);
+      const result = await this.api.forkTree(session, { entryId, expectedLeafId: tree.activeLeafId }, machineId);
+      await this.applySessionTreeForkResult(session, machineId, result, expected, tree);
+      return result;
     } catch (error) {
       this.reportSessionError(session, machineId, error, errorOwner);
       throw error;
+    } finally {
+      this.pendingTreeActions.delete(pending);
     }
+  }
 
-    if (result.cancelled) return result;
+  private async applySessionTreeForkResult(session: SessionInfo, machineId: string, result: SessionTreeForkResult, expected: NavigationSelection, tree?: SessionTreeSnapshot): Promise<void> {
+    if (result.cancelled) return;
 
+    const originalCacheKey = machineSessionKey(machineId, session.id);
     const forked = result.session;
+    if (forked.id === session.id) {
+      await this.applySessionTreeNavigationResult(session, machineId, { cancelled: false,
+        ...(result.promptDraft === undefined ? {} : { editorText: result.promptDraft }),
+      }, tree);
+      return;
+    }
     // The draft belongs to the forked session file; the original keeps its own.
     if (result.promptDraft !== undefined) saveDraft(machineSessionKey(machineId, forked.id), result.promptDraft);
     // The daemon replaced the runtime behind the original session identity with
@@ -687,7 +721,7 @@ export class SessionController {
 
     // The fork happened regardless, but the list/selection update belongs to
     // whoever owns the selection now; a changed selection may already reflect it.
-    if (!this.isSelectedSessionIdentity(session.id, machineId)) return result;
+    if (!this.isSelectedSessionIdentity(session.id, machineId)) return;
     const sessions = [forked, ...this.getState().sessions.filter((candidate) => candidate.id !== forked.id)];
     this.setState({ sessions });
     if (this.navigateToSession !== undefined) {
@@ -697,7 +731,6 @@ export class SessionController {
       this.setState({ treeDialog: undefined });
       await this.selectSession(forked);
     }
-    return result;
   }
 
   async abortTreeNavigation(): Promise<void> {
@@ -720,6 +753,42 @@ export class SessionController {
 
   applySessionStatus(status: SessionStatus): void {
     this.applyStatus(status);
+  }
+
+  async useSuggestedInput(machineId: string, sessionId: string): Promise<void> {
+    if (!this.isSelectedSessionIdentity(sessionId, machineId)) return;
+    const state = this.getState();
+    const session = state.selectedSession;
+    const text = state.status?.sessionId === sessionId ? state.status.suggestedInput : undefined;
+    if (session === undefined || text === undefined) return;
+    const errorOwner = this.captureSessionErrorOwner(session);
+    saveDraft(machineSessionKey(machineId, sessionId), text);
+    try {
+      await this.replacePromptEditorText?.({ machineId, sessionId, text });
+    } catch (error) {
+      this.reportSessionError(session, machineId, error, errorOwner);
+    }
+  }
+
+  private invalidateSessionTree(): void {
+    const state = this.getState();
+    const session = state.selectedSession;
+    const machineId = selectedMachineId(state);
+    if (session === undefined || !this.isSelectedSessionIdentity(session.id, machineId)) return;
+    this.transcripts.discard(machineSessionKey(machineId, session.id));
+    this.clearPendingUpdates();
+    void this.refreshSelectedSession(session.id);
+
+    // Retire the separately loaded picker rather than issuing /tree while the
+    // extension command may still be active. Explicit HTTP actions own their
+    // busy picker until their response has applied the requested change.
+    if (state.treeDialog !== undefined && !this.hasPendingTreeAction(machineId, session.id)) {
+      this.setState({ treeDialog: undefined });
+    }
+  }
+
+  private hasPendingTreeAction(machineId: string, sessionId: string): boolean {
+    return [...this.pendingTreeActions].some((pending) => pending.machineId === machineId && pending.sessionId === sessionId);
   }
 
   async archiveSession(session = this.getState().selectedSession) {
@@ -1323,25 +1392,28 @@ export class SessionController {
     const key = machineSessionKey(target.machineId, target.session.id);
     // Start buffering synchronously, including the coordinator's queued phase.
     this.bufferRefreshEvents(target);
-    return this.selectedSessionRefreshes.request(key, async () => {
+    // The notification controller coalesces its own refreshes. Keep that work
+    // outside the transcript coordinator so a slow inbox never blocks replay
+    // or a subsequent snapshot, while callers still await both results.
+    const notificationsRefresh = Promise.resolve().then(() => {
+      if (!this.isCurrentRefreshTarget(target)) return;
+      return this.notifications?.refreshSelectedSession(target.session, target.machineId);
+    });
+    notificationsRefresh.catch(() => undefined);
+    const transcriptRefresh = this.selectedSessionRefreshes.request(key, async () => {
       if (!this.isCurrentRefreshTarget(target)) return;
       const buffer = this.bufferRefreshEvents(target);
-      let notificationsRefresh: Promise<void>;
+      const historyRevision = this.transcripts.historyRevision(key);
       try {
-        // Notifications run alongside the snapshot but must not delay either
-        // transcript display or buffered-event replay. Await them afterwards
-        // so refresh completion and error reporting still include their result.
-        notificationsRefresh = this.notifications?.refreshSelectedSession(target.session, target.machineId) ?? Promise.resolve();
-        notificationsRefresh.catch(() => undefined);
         const snapshot = await this.api.transcriptSnapshot(target.session, { limit: MESSAGE_PAGE_SIZE }, target.machineId);
-        if (!this.isCurrentRefreshTarget(target)) return;
+        if (!this.isCurrentRefreshTarget(target) || this.transcripts.historyRevision(key) !== historyRevision) return;
         const { page, status } = snapshot;
         this.preserveBufferedDialogOutcomes(buffer, snapshot.seq);
         if (!this.isUnchangedSelectedRefresh(target, key, page, status, snapshot)) {
           // History, partial, and watermark describe the same daemon boundary.
           // Replay only events newer than it; never overwrite an already-applied
           // live event with a response that was captured before that event.
-          const history = this.transcripts.mergeHistory(key, page);
+          const history = this.transcripts.mergeSnapshot(key, page);
           const messages = this.transcripts.seedStreamingPartial(history.messages, snapshot.partial);
           this.streamWatermark = { sessionId: target.session.id, seq: snapshot.seq };
           this.setState({
@@ -1359,11 +1431,14 @@ export class SessionController {
         // its events there too, so failure never strands or loses live output.
         // A retired selection must not replay into the newly selected session.
         if (this.isCurrentRefreshTarget(target)) {
-          for (const event of buffer.events) this.applyEvent(event);
+          for (const event of buffer.events) {
+            if (!this.isCurrentRefreshTarget(target)) break;
+            this.applyEvent(event);
+          }
         }
       }
-      await notificationsRefresh;
     });
+    return transcriptRefresh.then(() => notificationsRefresh);
   }
 
   private preserveBufferedDialogOutcomes(buffer: SelectedSessionRefreshBuffer, seq: number): void {
@@ -1815,7 +1890,11 @@ export class SessionController {
       forgetCachedNewSession(session.id, machineId);
       const cachedReplacement = markCachedNewSessionInfo(replacement, machineId);
       const wasSelected = this.getState().selectedSession?.id === session.id;
-      this.setState({ sessions: [cachedReplacement, ...this.getState().sessions.filter((candidate) => candidate.id !== session.id)], error: "" });
+      // A session.created broadcast can insert the replacement before HTTP resolves.
+      this.setState({
+        sessions: [cachedReplacement, ...this.getState().sessions.filter((candidate) => candidate.id !== session.id && candidate.id !== replacement.id)],
+        error: "",
+      });
       if (wasSelected && this.navigateToSession !== undefined) {
         // Surface-only navigation retains this selection load. Carry its latest
         // surface, but keep the initiating hierarchy/session expectation so the
@@ -1995,6 +2074,11 @@ export class SessionController {
     // history + partial). Everything past the watermark applies exactly once,
     // so live content streams directly on top of the seeded partial.
     if (this.isStreamEventBelowWatermark(event)) return;
+
+    if (event.type === "session.tree.changed") {
+      this.invalidateSessionTree();
+      return;
+    }
 
     // Status and activity arrive once per token (the server republishes them on
     // every transcript event). Buffer them alongside high-frequency transcript
@@ -2224,7 +2308,9 @@ export class SessionController {
   // should not occur on the per-session socket) are never dropped.
   private isStreamEventBelowWatermark(event: SessionUiEvent): boolean {
     // These effects are not part of the history/status/partial snapshot.
-    if (event.type === "session.name" || event.type === "session.error" || event.type === "command.output") return false;
+    // Tree invalidations also retire a separately loaded tree picker.
+    if (event.type === "session.name" || event.type === "session.error" || event.type === "command.output"
+      || event.type === "session.tree.changed") return false;
     const watermark = this.streamWatermark;
     if (watermark === undefined || watermark.sessionId !== this.getState().selectedSession?.id) return false;
     return event.seq !== undefined && event.seq <= watermark.seq;
