@@ -69,8 +69,9 @@ describe("Docker command assets", () => {
     expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
     expect(instructions).toContain("Do not build Falcon, run a full monorepo build");
     expect(instructions).toContain("one worker for memory-heavy");
-    expect(instructions).toContain("`worker` for a routine");
-    expect(instructions).toContain("`worker-strong` for consequential");
+    expect(instructions).toContain("Default to `worker` for routine");
+    expect(instructions).toContain("Choose `worker-strong` immediately");
+    expect(instructions).toContain("Model cost alone must not route consequential work");
     expect(prWatch).toContain("model: together/zai-org/GLM-5.3-Flash");
     expect(strongWorker).toContain("name: worker-strong");
     expect(strongWorker).toContain("model: together/zai-org/GLM-5.3");
@@ -86,7 +87,8 @@ describe("Docker command assets", () => {
     expect(entrypoint).toContain("merge-managed-pi-profile.mjs");
     expect(entrypoint).toContain('const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.3"');
     expect(entrypoint).toContain('const workerModel = "together/zai-org/GLM-5.3-Flash"');
-    expect(entrypoint).toContain("agentOverrides.worker = { ...workerOverride, model: workerModel }");
+    expect(entrypoint).toContain("DEFAULT low-cost implementation writer");
+    expect(entrypoint).toContain("agentOverrides.worker = { ...workerOverride, model: workerModel, description: workerDescription }");
     expect(entrypoint).toContain("Runtime-owned Pi");
     expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");
   });

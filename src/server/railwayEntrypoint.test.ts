@@ -36,8 +36,10 @@ describe("Railway entrypoint", () => {
     expect(agent).toContain("name: pr-watch");
     expect(agent).toContain("model: together/zai-org/GLM-5.3-Flash");
     expect(strongWorker).toContain("name: worker-strong");
+    expect(strongWorker).toContain("description: ESCALATION implementation writer");
     expect(strongWorker).toContain("model: together/zai-org/GLM-5.3");
     expect(entrypoint).toContain('const workerModel = "together/zai-org/GLM-5.3-Flash"');
+    expect(entrypoint).toContain("DEFAULT low-cost implementation writer");
     expect(agent).toContain("pr-watch-fetch.mjs");
     expect(helper).toContain("export { parseArgs, buildResult, classify, pollLoop }");
     expect(prompt).toContain('agent: \\"pr-watch\\"');

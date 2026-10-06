@@ -1,15 +1,22 @@
-# Delegation
+# Delegation and model routing
 
 `pi-subagents` is installed for focused delegation. Use it when a fresh context,
 parallel read-only investigation, bounded implementation, or independent review
 is worth the coordination overhead. Do not delegate trivial work.
 
 - Use `scout` to map an unfamiliar area before changing it.
-- Use `worker` for a routine, clearly bounded implementation with one writer
-  per workspace. It is pinned to the inexpensive GLM-5.3-Flash model.
-- Use `worker-strong` for consequential or cross-cutting implementation, hard
-  debugging, or a task where the light worker has stalled. It is pinned to the
-  full GLM-5.3 model.
+- For implementation, choose exactly one writer per workspace:
+  - Default to `worker` for routine, localized, reversible work with clear
+    acceptance criteria. It is the inexpensive GLM-5.3-Flash path.
+  - Choose `worker-strong` immediately when the work affects architecture,
+    security/auth, concurrency, persistence or migrations; crosses multiple
+    subsystems; requires difficult debugging; or the user asks for the
+    strongest or most thorough implementation. It uses full GLM-5.3.
+  - Escalate from `worker` to `worker-strong` if the light worker stalls,
+    returns an uncertain result, or fails verification. Pass the first
+    worker's evidence forward; do not run two implementation writers against
+    the same workspace concurrently.
+- Model cost alone must not route consequential work to `worker`.
 - Use fresh `reviewer` agents after meaningful changes; the parent synthesizes
   findings and owns any follow-up edits.
 - Use `oracle` for a second opinion on a consequential decision before acting.

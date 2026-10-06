@@ -1,6 +1,6 @@
 ---
 name: worker-strong
-description: Strong implementation agent for consequential, cross-cutting, or difficult tasks
+description: ESCALATION implementation writer on full GLM-5.3. Use for architecture, security/auth, concurrency, persistence/migrations, cross-subsystem changes, difficult debugging, strongest/thorough requests, or after worker stalls or fails verification.
 aliases: strong-worker, senior-worker
 acceptanceRole: writer
 model: together/zai-org/GLM-5.3

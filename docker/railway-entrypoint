@@ -95,6 +95,7 @@ const path = require("node:path");
 const agentDir = "/data/pi-agent";
 const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.3";
 const workerModel = "together/zai-org/GLM-5.3-Flash";
+const workerDescription = "DEFAULT low-cost implementation writer for routine, localized, reversible work with clear acceptance criteria. Use worker-strong instead for architecture, security/auth, concurrency, persistence/migrations, cross-subsystem changes, difficult debugging, or after this worker stalls or fails verification.";
 
 function readObject(file) {
   if (!fs.existsSync(file)) return {};
@@ -137,7 +138,7 @@ const agentOverrides = subagents.agentOverrides && !Array.isArray(subagents.agen
 const workerOverride = agentOverrides.worker && !Array.isArray(agentOverrides.worker) && typeof agentOverrides.worker === "object"
   ? agentOverrides.worker
   : {};
-agentOverrides.worker = { ...workerOverride, model: workerModel };
+agentOverrides.worker = { ...workerOverride, model: workerModel, description: workerDescription };
 subagents.agentOverrides = agentOverrides;
 settings.subagents = subagents;
 writePrivate(settingsFile, settings);
