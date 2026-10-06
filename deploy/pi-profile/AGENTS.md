@@ -5,18 +5,22 @@ parallel read-only investigation, bounded implementation, or independent review
 is worth the coordination overhead. Do not delegate trivial work.
 
 - Use `scout` to map an unfamiliar area before changing it.
-- For implementation, choose exactly one writer per workspace:
-  - Default to `worker` for routine, localized, reversible work with clear
-    acceptance criteria. It is the inexpensive GLM-5.3-Flash path.
-  - Choose `worker-strong` immediately when the work affects architecture,
-    security/auth, concurrency, persistence or migrations; crosses multiple
-    subsystems; requires difficult debugging; or the user asks for the
-    strongest or most thorough implementation. It uses full GLM-5.3.
-  - Escalate from `worker` to `worker-strong` if the light worker stalls,
-    returns an uncertain result, or fails verification. Pass the first
-    worker's evidence forward; do not run two implementation writers against
-    the same workspace concurrently.
-- Model cost alone must not route consequential work to `worker`.
+- For implementation, choose exactly one writer per workspace. Pick the writer
+  by context mode, then choose the model tier per run:
+  - Default to `worker` (GLM-5.3-Flash, fresh context) for routine, localized,
+    reversible work with clear acceptance criteria.
+  - Use `worker-fork` (GLM-5.3-Flash, forked context) when an established
+    pattern, follow-up, or cleanup should inherit the parent's verified
+    conversation instead of re-deriving a brief. Fork re-processes the inherited
+    transcript every turn, so prefer the fresh `worker` unless that context is
+    genuinely valuable.
+  - For consequential work involving architecture, security/auth, concurrency,
+    persistence or migrations, multiple subsystems, difficult debugging, or a
+    Flash worker that stalled or failed verification, use either writer with
+    the per-run model `together/zai-org/GLM-5.3`.
+- Model cost alone must not route consequential work to Flash. Pass prior
+  evidence forward when escalating, and never run two implementation writers
+  against the same workspace concurrently.
 - Use fresh `reviewer` agents after meaningful changes; the parent synthesizes
   findings and owns any follow-up edits.
 - Use `oracle` for a second opinion on a consequential decision before acting.

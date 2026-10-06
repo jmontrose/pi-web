@@ -65,6 +65,10 @@ for managed_subdirectory in agents prompts; do
   done < <(find "$managed_profile_dir/$managed_subdirectory" -maxdepth 1 -type f -print0)
 done
 
+# Retire the exact deployment-owned predecessor after the worker routing model
+# moved from worker/worker-strong to fresh/fork plus a per-run model override.
+rm -f -- "$agent_dir/agents/worker-strong.md"
+
 if [[ -n "${PI_WEB_GIT_USER_NAME:-}" ]]; then
   git config --global user.name "$PI_WEB_GIT_USER_NAME"
 fi
@@ -95,7 +99,8 @@ const path = require("node:path");
 const agentDir = "/data/pi-agent";
 const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.3";
 const workerModel = "together/zai-org/GLM-5.3-Flash";
-const workerDescription = "DEFAULT low-cost implementation writer for routine, localized, reversible work with clear acceptance criteria. Use worker-strong instead for architecture, security/auth, concurrency, persistence/migrations, cross-subsystem changes, difficult debugging, or after this worker stalls or fails verification.";
+const workerDescription = "DEFAULT fresh-context writer on GLM-5.3-Flash for routine, localized, reversible work with clear acceptance criteria. Use worker-fork when the parent's verified context should carry the work. Pass model together/zai-org/GLM-5.3 per-run for architecture, security/auth, concurrency, persistence/migrations, cross-subsystem changes, difficult debugging, or after Flash stalls or fails verification.";
+const scoutDescription = "Low-cost read-oriented scout on GLM-5.3-Flash. Use for bounded reconnaissance; reviewer and oracle inherit the full GLM-5.3 subagent default.";
 
 function readObject(file) {
   if (!fs.existsSync(file)) return {};
@@ -132,12 +137,17 @@ settings.enabledModels = enabled;
 const subagents = settings.subagents && !Array.isArray(settings.subagents) && typeof settings.subagents === "object"
   ? settings.subagents
   : {};
+subagents.defaultModel = selectedModel;
 const agentOverrides = subagents.agentOverrides && !Array.isArray(subagents.agentOverrides) && typeof subagents.agentOverrides === "object"
   ? subagents.agentOverrides
+  : {};
+const scoutOverride = agentOverrides.scout && !Array.isArray(agentOverrides.scout) && typeof agentOverrides.scout === "object"
+  ? agentOverrides.scout
   : {};
 const workerOverride = agentOverrides.worker && !Array.isArray(agentOverrides.worker) && typeof agentOverrides.worker === "object"
   ? agentOverrides.worker
   : {};
+agentOverrides.scout = { ...scoutOverride, model: workerModel, description: scoutDescription };
 agentOverrides.worker = { ...workerOverride, model: workerModel, description: workerDescription };
 subagents.agentOverrides = agentOverrides;
 settings.subagents = subagents;

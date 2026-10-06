@@ -48,14 +48,14 @@ describe("Docker command assets", () => {
   });
 
   it("ships a non-secret managed Railway Pi profile with pinned subagents", async () => {
-    const [dockerfile, entrypoint, instructions, packagesText, profileIgnore, prWatch, strongWorker] = await Promise.all([
+    const [dockerfile, entrypoint, instructions, packagesText, profileIgnore, prWatch, forkWorker] = await Promise.all([
       readRepoFile("Dockerfile"),
       readRepoFile("docker/railway-entrypoint"),
       readRepoFile("deploy/pi-profile/AGENTS.md"),
       readRepoFile("deploy/pi-profile/packages.json"),
       readRepoFile("deploy/pi-profile/.gitignore"),
       readRepoFile("deploy/pi-profile/agents/pr-watch.md"),
-      readRepoFile("deploy/pi-profile/agents/worker-strong.md"),
+      readRepoFile("deploy/pi-profile/agents/worker-fork.md"),
     ]);
     expect(JSON.parse(packagesText)).toEqual({
       packages: [{
@@ -69,12 +69,14 @@ describe("Docker command assets", () => {
     expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
     expect(instructions).toContain("Do not build Falcon, run a full monorepo build");
     expect(instructions).toContain("one worker for memory-heavy");
-    expect(instructions).toContain("Default to `worker` for routine");
-    expect(instructions).toContain("Choose `worker-strong` immediately");
-    expect(instructions).toContain("Model cost alone must not route consequential work");
+    expect(instructions).toContain("by context mode, then choose the model tier per run");
+    expect(instructions).toContain("Use `worker-fork`");
+    expect(instructions).toContain("per-run model `together/zai-org/GLM-5.3`");
+    expect(instructions).toContain("Model cost alone must not route consequential work to Flash");
     expect(prWatch).toContain("model: together/zai-org/GLM-5.3-Flash");
-    expect(strongWorker).toContain("name: worker-strong");
-    expect(strongWorker).toContain("model: together/zai-org/GLM-5.3");
+    expect(forkWorker).toContain("name: worker-fork");
+    expect(forkWorker).toContain("model: together/zai-org/GLM-5.3-Flash");
+    expect(forkWorker).toContain("defaultContext: fork");
     expect(profileIgnore).toContain("*");
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
@@ -87,8 +89,11 @@ describe("Docker command assets", () => {
     expect(entrypoint).toContain("merge-managed-pi-profile.mjs");
     expect(entrypoint).toContain('const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.3"');
     expect(entrypoint).toContain('const workerModel = "together/zai-org/GLM-5.3-Flash"');
-    expect(entrypoint).toContain("DEFAULT low-cost implementation writer");
+    expect(entrypoint).toContain("DEFAULT fresh-context writer");
+    expect(entrypoint).toContain("subagents.defaultModel = selectedModel");
+    expect(entrypoint).toContain("agentOverrides.scout = { ...scoutOverride, model: workerModel, description: scoutDescription }");
     expect(entrypoint).toContain("agentOverrides.worker = { ...workerOverride, model: workerModel, description: workerDescription }");
+    expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
     expect(entrypoint).toContain("Runtime-owned Pi");
     expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");
   });

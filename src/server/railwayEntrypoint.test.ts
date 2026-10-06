@@ -19,11 +19,11 @@ describe("Railway entrypoint", () => {
   });
 
   it("installs the managed PR watcher without copying runtime secrets", async () => {
-    const [entrypoint, packagesText, agent, strongWorker, helper, prompt] = await Promise.all([
+    const [entrypoint, packagesText, agent, forkWorker, helper, prompt] = await Promise.all([
       readFile(resolve(repoRoot, "docker", "railway-entrypoint"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "packages.json"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "pr-watch.md"), "utf8"),
-      readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "worker-strong.md"), "utf8"),
+      readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "worker-fork.md"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "pr-watch-fetch.mjs"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "prompts", "pr-watch.md"), "utf8"),
     ]);
@@ -35,15 +35,17 @@ describe("Railway entrypoint", () => {
     expect(entrypoint).toContain('install -o "$runtime_uid" -g "$runtime_gid" -m 0600');
     expect(agent).toContain("name: pr-watch");
     expect(agent).toContain("model: together/zai-org/GLM-5.3-Flash");
-    expect(strongWorker).toContain("name: worker-strong");
-    expect(strongWorker).toContain("description: ESCALATION implementation writer");
-    expect(strongWorker).toContain("model: together/zai-org/GLM-5.3");
+    expect(forkWorker).toContain("name: worker-fork");
+    expect(forkWorker).toContain("model: together/zai-org/GLM-5.3-Flash");
+    expect(forkWorker).toContain("defaultContext: fork");
     expect(entrypoint).toContain('const workerModel = "together/zai-org/GLM-5.3-Flash"');
-    expect(entrypoint).toContain("DEFAULT low-cost implementation writer");
+    expect(entrypoint).toContain("DEFAULT fresh-context writer");
+    expect(entrypoint).toContain("subagents.defaultModel = selectedModel");
+    expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
     expect(agent).toContain("pr-watch-fetch.mjs");
     expect(helper).toContain("export { parseArgs, buildResult, classify, pollLoop }");
     expect(prompt).toContain('agent: \\"pr-watch\\"');
-    for (const managedFile of [agent, strongWorker, helper, prompt]) {
+    for (const managedFile of [agent, forkWorker, helper, prompt]) {
       expect(managedFile).not.toMatch(/BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
       expect(managedFile).not.toMatch(/(?:GH|GITHUB|TOGETHER)_TOKEN\s*=/);
     }
