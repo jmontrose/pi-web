@@ -11,14 +11,14 @@ const manifest = {
 describe("managed Railway Pi profile", () => {
   it("replaces another source for a managed package while preserving unrelated settings", () => {
     expect(mergeManagedPiPackages({
-      defaultModel: "zai-org/GLM-5.2",
+      defaultModel: "zai-org/GLM-5.3",
       packages: [
         "npm:pi-subagents@0.70.0",
         "npm:pi-web-access",
         { source: "npm:@acme/tools@1.2.3", extensions: ["tools.js"] },
       ],
     }, manifest)).toEqual({
-      defaultModel: "zai-org/GLM-5.2",
+      defaultModel: "zai-org/GLM-5.3",
       packages: [
         "npm:pi-web-access",
         { source: "npm:@acme/tools@1.2.3", extensions: ["tools.js"] },

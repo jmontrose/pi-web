@@ -5,8 +5,11 @@ parallel read-only investigation, bounded implementation, or independent review
 is worth the coordination overhead. Do not delegate trivial work.
 
 - Use `scout` to map an unfamiliar area before changing it.
-- Use `worker` for a clearly bounded implementation with one writer per
-  workspace.
+- Use `worker` for a routine, clearly bounded implementation with one writer
+  per workspace. It is pinned to the inexpensive GLM-5.3-Flash model.
+- Use `worker-strong` for consequential or cross-cutting implementation, hard
+  debugging, or a task where the light worker has stalled. It is pinned to the
+  full GLM-5.3 model.
 - Use fresh `reviewer` agents after meaningful changes; the parent synthesizes
   findings and owns any follow-up edits.
 - Use `oracle` for a second opinion on a consequential decision before acting.

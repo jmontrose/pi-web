@@ -93,7 +93,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const agentDir = "/data/pi-agent";
-const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.2";
+const model = process.env.PI_WEB_TOGETHER_MODEL || "zai-org/GLM-5.3";
+const workerModel = "together/zai-org/GLM-5.3-Flash";
 
 function readObject(file) {
   if (!fs.existsSync(file)) return {};
@@ -125,7 +126,20 @@ const enabled = Array.isArray(settings.enabledModels)
   ? settings.enabledModels.filter((entry) => entry !== "together/*")
   : [];
 if (!enabled.includes(selectedModel)) enabled.push(selectedModel);
+if (!enabled.includes(workerModel)) enabled.push(workerModel);
 settings.enabledModels = enabled;
+const subagents = settings.subagents && !Array.isArray(settings.subagents) && typeof settings.subagents === "object"
+  ? settings.subagents
+  : {};
+const agentOverrides = subagents.agentOverrides && !Array.isArray(subagents.agentOverrides) && typeof subagents.agentOverrides === "object"
+  ? subagents.agentOverrides
+  : {};
+const workerOverride = agentOverrides.worker && !Array.isArray(agentOverrides.worker) && typeof agentOverrides.worker === "object"
+  ? agentOverrides.worker
+  : {};
+agentOverrides.worker = { ...workerOverride, model: workerModel };
+subagents.agentOverrides = agentOverrides;
+settings.subagents = subagents;
 writePrivate(settingsFile, settings);
 NODE
 fi

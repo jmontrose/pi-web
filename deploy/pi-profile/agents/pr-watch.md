@@ -3,7 +3,7 @@ name: pr-watch
 description: Persistent GitHub PR watcher. Polls a PR's CI checks, reviews, and comments in the background until there is something the parent can act on — a new CI failure or a new review-bot/human comment — or until all CI settles, or a deadline (default 45m — moon-ci can run over 30m, so the deadline gives real margin past it). Returns ONLY then, so the parent launches once and gets woken on completion. The run can legitimately take over half an hour on a PR that triggers moon-ci; that is expected, not a hang. Cheap/fast; fresh context; just needs the PR number or URL. Use `once` for a single snapshot.
 advertise: true
 aliases: prwatch, pr-watcher, pr-poll
-model: together/deepseek-ai/DeepSeek-V4.1-Flash
+model: together/zai-org/GLM-5.3-Flash
 thinking: low
 tools: bash, read
 systemPromptMode: replace
