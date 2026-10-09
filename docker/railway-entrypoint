@@ -79,6 +79,17 @@ for managed_subdirectory in agents prompts; do
   done < <(find "$managed_profile_dir/$managed_subdirectory" -maxdepth 1 -type f -print0)
 done
 
+# Skills may contain nested support files. Copy only deployment-owned files,
+# preserving their relative paths without disturbing user-installed skills.
+if [[ -d "$managed_profile_dir/skills" ]]; then
+  while IFS= read -r -d '' managed_source_file; do
+    managed_relative_file="${managed_source_file#"$managed_profile_dir/"}"
+    managed_target_file="$agent_dir/$managed_relative_file"
+    install -d -o "$runtime_uid" -g "$runtime_gid" -m 0700 "$(dirname "$managed_target_file")"
+    install_managed_profile_file "$managed_source_file" "$managed_target_file"
+  done < <(find "$managed_profile_dir/skills" -type f -print0)
+fi
+
 # Retire the exact deployment-owned predecessor after the worker routing model
 # moved from worker/worker-strong to fresh/fork plus a per-run model override.
 rm -f -- "$agent_dir/agents/worker-strong.md"

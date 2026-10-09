@@ -28,3 +28,9 @@ than being duplicated in the application image. Startup restores its
 non-interactive PATH links and the disposable `/var/tmp/cargo-target` directory;
 the managed `AGENTS.md` documents the per-checkout target symlink required to
 keep large build artifacts off the Railway volume.
+
+The Railway image also pins Moon 2.5.5 (matching Siro's `.prototools` pin) and
+Linearis 2026.8.0. A hosted adaptation of the Linearis skill from tag
+`v2026.8.0` is vendored under `skills/linearis`; recompare it when upgrading the
+CLI. Authentication is supplied only at runtime through the Railway
+`LINEAR_API_TOKEN` secret and must never be added to this profile.

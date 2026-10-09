@@ -40,10 +40,18 @@ RUN managed_package_source="$(jq -r '.packages[0].installSource' deploy/pi-profi
 FROM base AS runtime
 
 ARG PNPM_VERSION=11.22.0
+ARG MOON_VERSION=2.5.5
+ARG LINEARIS_VERSION=2026.8.0
 
 RUN corepack enable \
   && corepack install --global "pnpm@${PNPM_VERSION}" \
   && test "$(pnpm --version)" = "$PNPM_VERSION"
+
+RUN npm install --global --omit=dev --no-audit --no-fund \
+    "@moonrepo/cli@${MOON_VERSION}" \
+    "linearis@${LINEARIS_VERSION}" \
+  && moon --version \
+  && linearis version
 
 ENV HOME=/data/home \
   GH_CONFIG_DIR=/data/config/gh \

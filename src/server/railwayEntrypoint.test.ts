@@ -67,4 +67,19 @@ describe("Railway entrypoint", () => {
       expect(managedFile).not.toMatch(/(?:GH|GITHUB|TOGETHER)_TOKEN\s*=/);
     }
   });
+
+  it("installs nested managed skills without replacing user-owned skill state", async () => {
+    const [entrypoint, skill] = await Promise.all([
+      readFile(resolve(repoRoot, "docker", "railway-entrypoint"), "utf8"),
+      readFile(resolve(repoRoot, "deploy", "pi-profile", "skills", "linearis", "SKILL.md"), "utf8"),
+    ]);
+
+    expect(entrypoint).toContain('if [[ -d "$managed_profile_dir/skills" ]]');
+    expect(entrypoint).toContain('managed_relative_file="${managed_source_file#"$managed_profile_dir/"}"');
+    expect(entrypoint).toContain('find "$managed_profile_dir/skills" -type f -print0');
+    expect(entrypoint).not.toContain('rm -rf -- "$agent_dir/skills"');
+    expect(skill).toContain("name: linearis");
+    expect(skill).toContain("linearis usage");
+    expect(skill).not.toMatch(/LINEAR_API_TOKEN\s*=/);
+  });
 });

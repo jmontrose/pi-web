@@ -48,7 +48,7 @@ describe("Docker command assets", () => {
   });
 
   it("ships a non-secret managed Railway Pi profile with pinned subagents", async () => {
-    const [dockerfile, entrypoint, instructions, packagesText, profileIgnore, prWatch, forkWorker] = await Promise.all([
+    const [dockerfile, entrypoint, instructions, packagesText, profileIgnore, prWatch, forkWorker, linearisSkill] = await Promise.all([
       readRepoFile("Dockerfile"),
       readRepoFile("docker/railway-entrypoint"),
       readRepoFile("deploy/pi-profile/AGENTS.md"),
@@ -56,6 +56,7 @@ describe("Docker command assets", () => {
       readRepoFile("deploy/pi-profile/.gitignore"),
       readRepoFile("deploy/pi-profile/agents/pr-watch.md"),
       readRepoFile("deploy/pi-profile/agents/worker-fork.md"),
+      readRepoFile("deploy/pi-profile/skills/linearis/SKILL.md"),
     ]);
     expect(JSON.parse(packagesText)).toEqual({
       packages: [{
@@ -69,6 +70,9 @@ describe("Docker command assets", () => {
     expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
     expect(instructions).toContain("Do not build Falcon, run a full monorepo build");
     expect(instructions).toContain("one worker for memory-heavy");
+    expect(instructions).toContain("The hosted Moon version is 2.5.5");
+    expect(instructions).toContain("Railway `LINEAR_API_TOKEN` secret");
+    expect(instructions).not.toMatch(/chimp/i);
     expect(instructions).toContain("# Rust toolchain (this environment)");
     expect(instructions).toContain("ln -sfnT /var/tmp/cargo-target target");
     expect(instructions).toContain("by context mode, then choose the model tier per run");
@@ -79,10 +83,16 @@ describe("Docker command assets", () => {
     expect(forkWorker).toContain("name: worker-fork");
     expect(forkWorker).toContain("model: together/zai-org/GLM-5.3-Flash");
     expect(forkWorker).toContain("defaultContext: fork");
+    expect(linearisSkill).toContain("name: linearis");
+    expect(linearisSkill).toContain("linearis usage");
     expect(profileIgnore).toContain("*");
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
     expect(dockerfile).toContain("ARG PNPM_VERSION=11.22.0");
+    expect(dockerfile).toContain("ARG MOON_VERSION=2.5.5");
+    expect(dockerfile).toContain("ARG LINEARIS_VERSION=2026.8.0");
+    expect(dockerfile).toContain('"@moonrepo/cli@${MOON_VERSION}"');
+    expect(dockerfile).toContain('"linearis@${LINEARIS_VERSION}"');
     expect(dockerfile).toContain("PATH=/data/pi-agent/bin:/data/home/.cargo/bin:");
     expect(dockerfile).toContain('corepack install --global "pnpm@${PNPM_VERSION}"');
     expect(dockerfile).toContain('test "$(pnpm --version)" = "$PNPM_VERSION"');
@@ -99,6 +109,7 @@ describe("Docker command assets", () => {
     expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
     expect(entrypoint).toContain("/var/tmp/cargo-target");
     expect(entrypoint).toContain("for rust_command in cargo rustc rustup cargo-clippy cargo-fmt wasm-bindgen cargo-binstall");
+    expect(entrypoint).toContain('find "$managed_profile_dir/skills" -type f -print0');
     expect(entrypoint).toContain("Runtime-owned Pi");
     expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");
   });

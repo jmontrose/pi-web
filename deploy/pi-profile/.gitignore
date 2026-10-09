@@ -8,3 +8,6 @@
 !agents/*.mjs
 !prompts/
 !prompts/*.md
+!skills/
+!skills/linearis/
+!skills/linearis/SKILL.md

@@ -54,6 +54,28 @@ smallest check that answers the task:
   TypeScript builds). Exit code 245 or a sudden memory spike is a reason to stop
   and narrow the work, not to retry at full parallelism.
 
+# Repository tooling
+
+`pnpm` and Moon are installed globally and available to non-interactive agent
+shells. The hosted Moon version is 2.5.5, matching Siro's current
+`.prototools` pin. Prefer a repository-local tool version when one is present,
+and report a pin mismatch rather than silently changing the repository's
+toolchain configuration.
+
+# Linear
+
+Linearis is installed as the `linearis` command (with `linear` as an alias), and
+its managed skill documents the discover-then-act protocol. Start with
+`linearis usage`, then run `linearis <domain> usage` before acting; do not guess
+subcommands or flags.
+
+Authentication comes from the Railway `LINEAR_API_TOKEN` secret. Never print,
+persist, commit, or pass the token as a command-line argument. If Linearis exits
+with code 42 or `AUTHENTICATION_REQUIRED`, report that the Railway variable is
+missing or invalid instead of attempting an interactive login. Keep mutations
+within the user's request and confirm destructive Linear operations before
+executing them.
+
 # Rust toolchain (this environment)
 
 Rust is installed with rustup under the persistent `/data/home/.cargo` and
