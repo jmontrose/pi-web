@@ -73,7 +73,7 @@ and stop. Do not retry, do not run `gh`.
 Otherwise decide from these top-level keys:
 
 - `poll` present → **poll mode** result. Read `poll.reason` ∈
-  `actionable` | `settled` | `settled-failing` | `moon-ci-failing` | `merge-conflict` | `deadline` | `baseline-failing`. The diff/baseline
+  `actionable` | `settled` | `settled-failing` | `moon-ci-failing` | `merge-conflict` | `deadline` | `baseline-failing` | `ci-unavailable`. The diff/baseline
   arrays are populated accordingly. `poll.elapsedMin`, `poll.deadlineMin`,
   `poll.iterations`, and `poll.stillRunning` (names) are precomputed for you.
 - `poll` absent, `firstWatch: true` → one-shot baseline.
@@ -99,6 +99,20 @@ Then continue with the reason's normal format. If the reason itself is
 `merge-conflict`, use the dedicated format below instead of prepending.
 
 ### Poll mode — `poll.reason`
+
+**`ci-unavailable`** (GitHub denied CI visibility; deterministic, returned on
+the first fetch rather than retried until deadline):
+```
+## PR #<n> <owner/repo> — ⚠️ CI visibility unavailable
+
+PR state, reviews, and comments were fetched, but checks and Actions cannot be
+monitored with this token. The PR is not fully monitored.
+Grant the fine-grained token repository read access to Checks, Commit statuses,
+and Actions, update GH_TOKEN, then relaunch pr-watch.
+```
+Then report any currently readable reviews, general comments, and inline review
+comments from the JSON in the usual sections. Never describe this as active or
+complete monitoring, and never say CI is settled or green.
 
 **`actionable`** (there is something to work on now):
 ```
@@ -235,3 +249,6 @@ did not include):
   correct, not a hang — do not kill it, do not re-run it, do not add a `timeout`
   to the bash call (the run is configured to allow up to 47m, agent timeout 50m).
   Just wait for its JSON and summarize.
+- A CI authorization failure is not transient. The helper returns
+  `ci-unavailable` immediately with readable PR activity; report the partial
+  coverage loudly and do not retry.

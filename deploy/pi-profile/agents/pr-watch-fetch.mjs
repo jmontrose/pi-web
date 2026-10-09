@@ -203,9 +203,23 @@ function ghApiList(path0) {
   return out;
 }
 
-function statePaths(owner, name, pr) {
-  const dir = join(STATE_ROOT, `${owner}__${name}`);
+function statePaths(owner, name, pr, stateRoot = STATE_ROOT) {
+  const dir = join(stateRoot, `${owner}__${name}`);
   return { dir, file: join(dir, `${pr}.json`) };
+}
+
+// GitHub reports missing fine-grained-token permissions through several
+// surfaces and wordings. Treat those failures as deterministic capability
+// gaps, not transient network errors that should be retried until deadline.
+export function isAuthorizationError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    /\b(?:401|403)\b/.test(message) ||
+    /resource not accessible by (?:personal access token|integration)/i.test(message) ||
+    /requires? (?:the )?.*permission/i.test(message) ||
+    /insufficient permissions?/i.test(message) ||
+    /forbidden/i.test(message)
+  );
 }
 
 function mapChecks(statusCheckRollup) {
@@ -239,37 +253,58 @@ function mapChecks(statusCheckRollup) {
 
 // Fetch the PR, build the snapshot, diff against prev, write snapshot, and
 // return the result object (baseline or diff). Does NOT emit.
-function buildResult(args) {
+function buildResult(args, deps = {}) {
   const { owner, name, pr, reset } = args;
   const slug = `${owner}/${name}`;
-  const { dir, file } = statePaths(owner, name, pr);
+  const { dir, file } = statePaths(owner, name, pr, deps.stateRoot || STATE_ROOT);
+  const fetchJson = deps.ghJson || ghJson;
+  const fetchApiList = deps.ghApiList || ghApiList;
 
   let meta;
   try {
-    meta = ghJson([
+    meta = fetchJson([
       "pr", "view", String(pr), "--repo", slug, "--json",
       "number,state,isDraft,mergeable,mergeStateStatus,reviewDecision," +
         "headRefName,headRefOid,baseRefName,title,labels,reviewRequests," +
-        "additions,deletions,changedFiles,statusCheckRollup",
+        "additions,deletions,changedFiles",
     ]);
   } catch (e) {
     throw new Error(`failed to fetch PR ${pr} in ${slug}: ${e.message}`);
   }
 
+  let checks = [];
+  let ciVisibility = { available: true, reason: null, message: null };
+  try {
+    const checkMeta = fetchJson([
+      "pr", "view", String(pr), "--repo", slug, "--json", "statusCheckRollup",
+    ]);
+    checks = mapChecks(checkMeta.statusCheckRollup);
+  } catch (e) {
+    if (!isAuthorizationError(e)) {
+      throw new Error(`failed to fetch PR ${pr} checks in ${slug}: ${e.message}`);
+    }
+    ciVisibility = {
+      available: false,
+      reason: "insufficient-permissions",
+      message:
+        "GitHub denied CI check data. Reviews and comments were fetched, but this token cannot monitor checks or Actions.",
+    };
+  }
+
   let reviews, issueComments, reviewComments;
   try {
-    reviews = ghApiList(`repos/${slug}/pulls/${pr}/reviews`);
-    issueComments = ghApiList(`repos/${slug}/issues/${pr}/comments`);
-    reviewComments = ghApiList(`repos/${slug}/pulls/${pr}/comments`);
+    reviews = fetchApiList(`repos/${slug}/pulls/${pr}/reviews`);
+    issueComments = fetchApiList(`repos/${slug}/issues/${pr}/comments`);
+    reviewComments = fetchApiList(`repos/${slug}/pulls/${pr}/comments`);
   } catch (e) {
     throw new Error(`failed to fetch PR ${pr} activity in ${slug}: ${e.message}`);
   }
 
-  const fetchedAt = new Date().toISOString();
-  const checks = mapChecks(meta.statusCheckRollup);
+  const fetchedAt = (deps.now ? deps.now() : new Date()).toISOString();
 
   const snapshot = {
     repo: slug, pr, fetchedAt,
+    ciVisibility,
     prMeta: {
       title: meta.title, state: meta.state, isDraft: meta.isDraft,
       mergeable: meta.mergeable, mergeStateStatus: meta.mergeStateStatus,
@@ -327,6 +362,7 @@ function buildResult(args) {
       firstWatch: true,
       repo: slug, pr, fetchedAt,
       statePath: file,
+      ciVisibility,
       counts: {
         checks: checks.length, failing: failingChecks.length,
         passing: passingChecks.length, running: runningChecks.length,
@@ -338,7 +374,7 @@ function buildResult(args) {
         name: c.name, workflow: c.workflowName, conclusion: c.conclusion, link: c.link,
       })),
       runningChecks: runningChecks.map((c) => c.name),
-      allTerminal: runningChecks.length === 0,
+      allTerminal: ciVisibility.available && runningChecks.length === 0,
       // GitHub reports mergeable="CONFLICTING" when the head and base have
       // merge conflicts. Surface it so the parent can rebase immediately
       // instead of waiting on CI that may be red downstream of the conflict.
@@ -355,6 +391,7 @@ function buildResult(args) {
     repo: slug, pr, fetchedAt,
     previousFetchedAt: prev.fetchedAt || null,
     statePath: file,
+    ciVisibility,
     prStateChanges: [],
     newFailures: [], nowPassing: [], stillRunning: [], newChecks: [],
     newReviews: [], newIssueComments: [], newReviewComments: [], editedComments: [],
@@ -436,7 +473,7 @@ function buildResult(args) {
       diff.editedComments.push({ kind: "review", id: c.id, user: c.user, bot: c.bot, path: c.path, line: c.line, body: c.body, link: c.htmlUrl, updatedAt: c.updatedAt });
   }
 
-  diff.allTerminal = diff.stillRunning.length === 0;
+  diff.allTerminal = ciVisibility.available && diff.stillRunning.length === 0;
   // Surface ALL currently-failing checks (not just new ones) so a pre-existing
   // red — especially moon-ci — is reported on re-watch instead of "all green",
   // and so moon-ci can short-circuit an immediate return (see classify).
@@ -517,6 +554,10 @@ function sleep(ms) {
 // parent can launch the moon-ci log distiller right away instead of waiting on
 // the rest of CI.
 function classify(res) {
+  // Partial review visibility is useful, but it is not a working PR monitor.
+  // Return immediately and loudly instead of silently retrying a deterministic
+  // permissions failure until the poll deadline.
+  if (res.ciVisibility?.available === false) return "ci-unavailable";
   if (res.firstWatch) {
     // A merge conflict is the cleanest first thing to surface on a fresh
     // watch: rebasing is cheap, fast, and often the root cause of red CI.

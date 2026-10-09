@@ -72,6 +72,10 @@ describe("Railway entrypoint", () => {
     expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
     expect(agent).toContain("pr-watch-fetch.mjs");
     expect(helper).toContain("export { parseArgs, buildResult, classify, pollLoop }");
+    expect(agent).toContain("ci-unavailable");
+    expect(agent).toContain("The PR is not fully monitored");
+    expect(helper).toContain('reason: "insufficient-permissions"');
+    expect(helper).toContain('return "ci-unavailable"');
     expect(prompt).toContain('agent: \\"pr-watch\\"');
     expect(dockerfile).toContain(
       "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/opt/pi-web/node_modules/@earendil-works/pi-coding-agent",
