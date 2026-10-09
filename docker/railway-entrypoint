@@ -23,12 +23,26 @@ mkdir -p \
   /data/home/.pi \
   /data/config/pi-web \
   /data/pi-web \
+  "$agent_dir/bin" \
+  /var/tmp/cargo-target \
   "$agent_dir" \
   "$workspace_root"
 if [[ "$volume_ownership_is_current" == false ]]; then
   chown -R "$runtime_uid:$runtime_gid" /data
 fi
 chmod 0700 /data/home/.ssh "$agent_dir"
+
+# Rustup is intentionally kept on the persistent volume instead of inflating
+# every application image with a second toolchain. Make an installed toolchain
+# visible to non-interactive agent shells, whose PATH includes agent_dir/bin,
+# and recreate the disposable Cargo target root lost with each container.
+for rust_command in cargo rustc rustup cargo-clippy cargo-fmt wasm-bindgen cargo-binstall; do
+  rust_command_source="/data/home/.cargo/bin/$rust_command"
+  if [[ -x "$rust_command_source" ]]; then
+    ln -sfnT "$rust_command_source" "$agent_dir/bin/$rust_command"
+  fi
+done
+chown "$runtime_uid:$runtime_gid" /var/tmp/cargo-target "$agent_dir/bin"
 
 readonly default_agent_link=/data/home/.pi/agent
 if [[ -L "$default_agent_link" ]]; then
@@ -222,6 +236,7 @@ runtime_owned_paths=(
   /data/config/pi-web
   /data/pi-web
   "$agent_dir"
+  "$agent_dir/bin"
   "$workspace_root"
   "$config_file"
   "$agent_dir/AGENTS.md"

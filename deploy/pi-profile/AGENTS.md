@@ -53,3 +53,36 @@ smallest check that answers the task:
   repository's lowest practical concurrency (one worker for memory-heavy
   TypeScript builds). Exit code 245 or a sudden memory spike is a reason to stop
   and narrow the work, not to retry at full parallelism.
+
+# Rust toolchain (this environment)
+
+Rust is installed with rustup under the persistent `/data/home/.cargo` and
+`/data/home/.rustup` directories. Stable Rust 1.99.0, `rustfmt`, `clippy`, the
+`wasm32-unknown-unknown` target, `cargo-binstall`, and
+`wasm-bindgen-cli@0.2.122` are available. The deployment exposes their commands
+through `/data/pi-agent/bin`, including to non-interactive agent shells that do
+not read a Bash startup file.
+
+Do not put Cargo build output on `/data`: the persistent volume is shared with
+workspaces and home state, and a large debug target can exhaust it. Before the
+first Cargo command in each checkout, use a disposable target on the container
+filesystem while preserving tools that expect `<repo>/target/...`:
+
+```bash
+mkdir -p /var/tmp/cargo-target
+if [[ -e target && ! -L target ]]; then
+  printf '%s\n' 'target exists and is not a symlink; inspect it before continuing' >&2
+  exit 1
+fi
+ln -sfnT /var/tmp/cargo-target target
+exclude_file="$(git rev-parse --git-path info/exclude)"
+grep -qxF /target "$exclude_file" || printf '/target\n' >>"$exclude_file"
+```
+
+The deployment recreates `/var/tmp/cargo-target` after a container rebuild, but
+its contents are intentionally disposable. The checkout's symlink persists. If
+`target` is a real directory rather than a symlink, inspect it before replacing
+it; never recursively delete an unresolved or unexpected path.
+
+Prefer package-scoped Rust checks and low build concurrency. Do not build the
+full Siro workspace or Falcon unless the task actually requires it.

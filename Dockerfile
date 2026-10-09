@@ -58,7 +58,7 @@ ENV HOME=/data/home \
   PI_WEB_REQUIRE_HTTP_AUTH=true \
   PI_WEB_DOCKER_RUNTIME=1 \
   PI_WEB_DOCKER_MODE=runtime \
-  PATH=/opt/pi-web/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
+  PATH=/data/pi-agent/bin:/data/home/.cargo/bin:/opt/pi-web/node_modules/.bin:/usr/local/bin:/usr/bin:/bin \
   SHELL=/bin/bash \
   TERM=xterm-256color
 

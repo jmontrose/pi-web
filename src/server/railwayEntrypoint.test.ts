@@ -18,6 +18,23 @@ describe("Railway entrypoint", () => {
     );
   });
 
+  it("restores persistent Rust commands and disposable Cargo build storage on boot", async () => {
+    const [dockerfile, entrypoint, instructions] = await Promise.all([
+      readFile(resolve(repoRoot, "Dockerfile"), "utf8"),
+      readFile(resolve(repoRoot, "docker", "railway-entrypoint"), "utf8"),
+      readFile(resolve(repoRoot, "deploy", "pi-profile", "AGENTS.md"), "utf8"),
+    ]);
+
+    expect(dockerfile).toContain("PATH=/data/pi-agent/bin:/data/home/.cargo/bin:");
+    expect(entrypoint).toContain("/var/tmp/cargo-target");
+    expect(entrypoint).toContain("for rust_command in cargo rustc rustup cargo-clippy cargo-fmt wasm-bindgen cargo-binstall");
+    expect(entrypoint).toContain('ln -sfnT "$rust_command_source" "$agent_dir/bin/$rust_command"');
+    expect(instructions).toContain("# Rust toolchain (this environment)");
+    expect(instructions).toContain("ln -sfnT /var/tmp/cargo-target target");
+    expect(instructions).toContain("target exists and is not a symlink");
+    expect(instructions).toContain("Do not put Cargo build output on `/data`");
+  });
+
   it("installs the managed PR watcher without copying runtime secrets", async () => {
     const [entrypoint, packagesText, agent, forkWorker, helper, prompt] = await Promise.all([
       readFile(resolve(repoRoot, "docker", "railway-entrypoint"), "utf8"),

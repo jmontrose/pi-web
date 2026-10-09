@@ -22,3 +22,9 @@ mode and model tier as separate choices.
 `worker-fork.md` intentionally copies the upstream worker contract to change
 its context default. Recompare it with the builtin worker after significant
 `pi-subagents` upgrades.
+
+The hosted Rust toolchain remains under the persistent `/data/home` tree rather
+than being duplicated in the application image. Startup restores its
+non-interactive PATH links and the disposable `/var/tmp/cargo-target` directory;
+the managed `AGENTS.md` documents the per-checkout target symlink required to
+keep large build artifacts off the Railway volume.

@@ -69,6 +69,8 @@ describe("Docker command assets", () => {
     expect(instructions).toContain("never claim an unavailable build, lint, or test gate");
     expect(instructions).toContain("Do not build Falcon, run a full monorepo build");
     expect(instructions).toContain("one worker for memory-heavy");
+    expect(instructions).toContain("# Rust toolchain (this environment)");
+    expect(instructions).toContain("ln -sfnT /var/tmp/cargo-target target");
     expect(instructions).toContain("by context mode, then choose the model tier per run");
     expect(instructions).toContain("Use `worker-fork`");
     expect(instructions).toContain("per-run model `together/zai-org/GLM-5.3`");
@@ -81,6 +83,7 @@ describe("Docker command assets", () => {
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
     expect(dockerfile).toContain("ARG PNPM_VERSION=11.22.0");
+    expect(dockerfile).toContain("PATH=/data/pi-agent/bin:/data/home/.cargo/bin:");
     expect(dockerfile).toContain('corepack install --global "pnpm@${PNPM_VERSION}"');
     expect(dockerfile).toContain('test "$(pnpm --version)" = "$PNPM_VERSION"');
     expect(dockerfile).toContain("PI_CODING_AGENT_DIR=/build/managed-agent");
@@ -94,6 +97,8 @@ describe("Docker command assets", () => {
     expect(entrypoint).toContain("agentOverrides.scout = { ...scoutOverride, model: workerModel, description: scoutDescription }");
     expect(entrypoint).toContain("agentOverrides.worker = { ...workerOverride, model: workerModel, description: workerDescription }");
     expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
+    expect(entrypoint).toContain("/var/tmp/cargo-target");
+    expect(entrypoint).toContain("for rust_command in cargo rustc rustup cargo-clippy cargo-fmt wasm-bindgen cargo-binstall");
     expect(entrypoint).toContain("Runtime-owned Pi");
     expect(entrypoint).not.toContain("rm -rf \"$agent_dir\"");
   });
