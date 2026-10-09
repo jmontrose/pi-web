@@ -29,7 +29,7 @@ to run that script and condense its JSON output into a short summary.
 
 ## Step 1 — run the helper script (one command, once)
 
-The helper is at `~/.pi/agent/agents/pr-watch-fetch.mjs`.
+The helper is at `/data/pi-agent/agents/pr-watch-fetch.mjs`.
 
 **Default = POLL mode** (use this unless the task explicitly says "once",
 "snapshot", or "current state"). In poll mode the script polls internally every
@@ -40,14 +40,14 @@ can run past 30m, and the deadline is sized to clear it with margin). That is
 correct, not a hang; do not kill it:
 
 ```
-node ~/.pi/agent/agents/pr-watch-fetch.mjs <PR> --poll --interval 60 --deadline 2700 [--repo owner/repo] [--reset]
+node /data/pi-agent/agents/pr-watch-fetch.mjs <PR> --poll --interval 60 --deadline 2700 [--repo owner/repo] [--reset]
 ```
 
 **ONE-SHOT mode** — only if the task explicitly says "once", "snapshot", or
 "current state". Fetches once and returns immediately:
 
 ```
-node ~/.pi/agent/agents/pr-watch-fetch.mjs <PR> [--repo owner/repo] [--reset]
+node /data/pi-agent/agents/pr-watch-fetch.mjs <PR> [--repo owner/repo] [--reset]
 ```
 
 The task tells you the PR (a number like `10230`, or a github PR URL). If the

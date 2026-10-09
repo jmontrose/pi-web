@@ -1,6 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +18,22 @@ afterEach(async () => {
 });
 
 describe("managed PR watcher", () => {
+  it("executes and emits JSON when invoked through a symlink", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "pi-web-pr-watch-symlink-"));
+    tempDirs.push(tempDir);
+    const helperPath = fileURLToPath(
+      new URL("../../deploy/pi-profile/agents/pr-watch-fetch.mjs", import.meta.url),
+    );
+    const symlinkPath = join(tempDir, "pr-watch-fetch.mjs");
+    await symlink(helperPath, symlinkPath);
+
+    const result = spawnSync(process.execPath, [symlinkPath], { encoding: "utf8" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain('{"error":"usage: pr-watch-fetch.mjs');
+  });
+
   it("returns readable review activity immediately when CI permissions are unavailable", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "pi-web-pr-watch-"));
     tempDirs.push(stateRoot);

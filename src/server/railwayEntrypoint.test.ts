@@ -71,7 +71,10 @@ describe("Railway entrypoint", () => {
     expect(entrypoint).toContain("subagents.defaultModel = selectedModel");
     expect(entrypoint).toContain('rm -f -- "$agent_dir/agents/worker-strong.md"');
     expect(agent).toContain("pr-watch-fetch.mjs");
+    expect(agent).toContain("/data/pi-agent/agents/pr-watch-fetch.mjs");
+    expect(agent).not.toContain("~/.pi/agent/agents/pr-watch-fetch.mjs");
     expect(helper).toContain("export { parseArgs, buildResult, classify, pollLoop }");
+    expect(helper).toContain("realpathSync(fileURLToPath(moduleUrl))");
     expect(agent).toContain("ci-unavailable");
     expect(agent).toContain("The PR is not fully monitored");
     expect(helper).toContain('reason: "insufficient-permissions"');

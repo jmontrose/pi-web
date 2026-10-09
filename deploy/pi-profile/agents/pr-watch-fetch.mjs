@@ -28,10 +28,10 @@
 // always parse stdout. Errors surface as { "error": "..." }.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const STATE_ROOT = join(homedir(), ".pi", "agent", "pr-watch");
 const FAILURE_SET = new Set(["FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "ERROR"]);
@@ -650,10 +650,22 @@ async function main() {
   }
 }
 
+// Node canonicalizes import.meta.url when the entrypoint is reached through a
+// symlink, but process.argv[1] retains the literal symlink path. Compare real
+// paths so a supported alternate path cannot silently turn execution into an
+// import-only no-op.
+function isMainModule(moduleUrl = import.meta.url, entryPath = process.argv[1]) {
+  if (!entryPath) return false;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(entryPath);
+  } catch {
+    return moduleUrl === pathToFileURL(entryPath).href;
+  }
+}
+
 // Exported for unit tests; only run main when executed directly.
 export { parseArgs, buildResult, classify, pollLoop };
 
-const isMain = import.meta.url === pathToFileURL(process.argv[1] || "").href;
-if (isMain) {
+if (isMainModule()) {
   main().catch((e) => fail("unexpected error: " + e.message));
 }
