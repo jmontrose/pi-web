@@ -26,6 +26,10 @@ describe("Railway entrypoint", () => {
     ]);
 
     expect(dockerfile).toContain("PATH=/data/pi-agent/bin:/data/home/.cargo/bin:");
+    expect(dockerfile).toContain(
+      "ARG OPENSUSE_IMAGE=registry.opensuse.org/opensuse/tumbleweed:latest",
+    );
+    expect(dockerfile).not.toContain("syntax=docker/dockerfile");
     expect(entrypoint).toContain("/var/tmp/cargo-target");
     expect(entrypoint).toContain("for rust_command in cargo rustc rustup cargo-clippy cargo-fmt wasm-bindgen cargo-binstall");
     expect(entrypoint).toContain('ln -sfnT "$rust_command_source" "$agent_dir/bin/$rust_command"');

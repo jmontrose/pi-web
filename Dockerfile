@@ -1,6 +1,4 @@
-# syntax=docker/dockerfile:1.7
-
-ARG OPENSUSE_IMAGE=opensuse/tumbleweed
+ARG OPENSUSE_IMAGE=registry.opensuse.org/opensuse/tumbleweed:latest
 
 FROM ${OPENSUSE_IMAGE} AS base
 
