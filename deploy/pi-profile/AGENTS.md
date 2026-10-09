@@ -35,6 +35,14 @@ or updating a pull request. It wakes the parent for actionable review activity,
 CI failure, CI settlement, merge conflict, or deadline. After launching it,
 return control to the user; do not add a foreground polling loop.
 
+A watcher is running only when the background launch returns a successful run
+identifier. If it throws, reports that background children are unavailable, or
+otherwise fails to return a run identifier, say so prominently in the same
+turn; never imply that the PR is being monitored. Foreground subagents still
+work in that failure mode. Until background launch succeeds, check `gh pr view`
+and `gh pr checks` at every turn boundary and whenever work resumes so review
+comments or CI failures do not sit unnoticed.
+
 The hosted environment may not have every repository tool installed. Follow
 project instructions, but never claim an unavailable build, lint, or test gate
 passed. If a required tool is missing, report the exact missing capability and

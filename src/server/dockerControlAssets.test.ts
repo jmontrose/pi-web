@@ -88,6 +88,14 @@ describe("Docker command assets", () => {
     expect(profileIgnore).toContain("*");
     expect(profileIgnore).not.toContain("auth.json");
     expect(dockerfile).toContain("PI_WEB_SUBSESSIONS=false");
+    expect(dockerfile).toContain(
+      "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/opt/pi-web/node_modules/@earendil-works/pi-coding-agent",
+    );
+    expect(dockerfile).toContain(
+      "test -f /opt/pi-web/node_modules/@earendil-works/pi-coding-agent/package.json",
+    );
+    expect(instructions).toContain("A watcher is running only when the background launch returns a successful run");
+    expect(instructions).toContain("check `gh pr view`");
     expect(dockerfile).toContain("ARG PNPM_VERSION=11.22.0");
     expect(dockerfile).toContain("ARG MOON_VERSION=2.5.5");
     expect(dockerfile).toContain("ARG LINEARIS_VERSION=2026.8.0");

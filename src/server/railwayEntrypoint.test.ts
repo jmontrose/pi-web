@@ -36,8 +36,11 @@ describe("Railway entrypoint", () => {
   });
 
   it("installs the managed PR watcher without copying runtime secrets", async () => {
-    const [entrypoint, packagesText, agent, forkWorker, helper, prompt] = await Promise.all([
+    const [dockerfile, supervisor, entrypoint, instructions, packagesText, agent, forkWorker, helper, prompt] = await Promise.all([
+      readFile(resolve(repoRoot, "Dockerfile"), "utf8"),
+      readFile(resolve(repoRoot, "docker", "railway-supervisor"), "utf8"),
       readFile(resolve(repoRoot, "docker", "railway-entrypoint"), "utf8"),
+      readFile(resolve(repoRoot, "deploy", "pi-profile", "AGENTS.md"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "packages.json"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "pr-watch.md"), "utf8"),
       readFile(resolve(repoRoot, "deploy", "pi-profile", "agents", "worker-fork.md"), "utf8"),
@@ -62,6 +65,17 @@ describe("Railway entrypoint", () => {
     expect(agent).toContain("pr-watch-fetch.mjs");
     expect(helper).toContain("export { parseArgs, buildResult, classify, pollLoop }");
     expect(prompt).toContain('agent: \\"pr-watch\\"');
+    expect(dockerfile).toContain(
+      "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/opt/pi-web/node_modules/@earendil-works/pi-coding-agent",
+    );
+    expect(dockerfile).toContain(
+      "test -f /opt/pi-web/node_modules/@earendil-works/pi-coding-agent/package.json",
+    );
+    expect(supervisor).not.toContain("-u PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT");
+    expect(instructions).toContain("A watcher is running only when the background launch returns a successful run");
+    expect(instructions).toContain("check `gh pr view`");
+    expect(prompt).toContain("returns a successful background run identifier");
+    expect(prompt).toContain("Never say or imply that monitoring is active after a failed launch");
     for (const managedFile of [agent, forkWorker, helper, prompt]) {
       expect(managedFile).not.toMatch(/BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/);
       expect(managedFile).not.toMatch(/(?:GH|GITHUB|TOGETHER)_TOKEN\s*=/);

@@ -60,6 +60,7 @@ ENV HOME=/data/home \
   PI_WEB_DATA_DIR=/data/pi-web \
   PI_WEB_SESSIOND_SOCKET=/data/pi-web/sessiond.sock \
   PI_CODING_AGENT_DIR=/data/pi-agent \
+  PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/opt/pi-web/node_modules/@earendil-works/pi-coding-agent \
   PI_WEB_HOST=0.0.0.0 \
   PI_WEB_SPAWN_SESSIONS=true \
   PI_WEB_SUBSESSIONS=false \
@@ -81,7 +82,8 @@ COPY scripts/merge-managed-pi-profile.mjs /opt/pi-web/scripts/merge-managed-pi-p
 COPY --chmod=0755 docker/railway-entrypoint /usr/local/bin/pi-web-railway-entrypoint
 COPY --chmod=0755 docker/railway-supervisor /usr/local/bin/pi-web-railway-supervisor
 
-RUN ln -sf /opt/pi-web/node_modules/.bin/pi /usr/local/bin/pi
+RUN test -f /opt/pi-web/node_modules/@earendil-works/pi-coding-agent/package.json \
+  && ln -sf /opt/pi-web/node_modules/.bin/pi /usr/local/bin/pi
 
 EXPOSE 8080
 

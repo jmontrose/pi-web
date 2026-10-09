@@ -18,6 +18,8 @@ subagent({
 Notes:
 - `$1` is the PR number or full github PR URL. If only a number is given, `pr-watch` derives `owner/repo` from the current repo's git remote (so run this from inside the repo, or add `--repo owner/repo` to the task).
 - Default deadline is 2100s (35m), which covers a 30m moon-ci run. Pass a second arg to override, e.g. `/pr-watch 10230 1800`.
+- The watcher is running only if the tool call returns a successful background run identifier. If it throws, says background children are unavailable, or returns no run identifier, report the failure prominently in the same turn. Never say or imply that monitoring is active after a failed launch.
+- If background launch fails, foreground subagents still work. Fall back to `gh pr view $1 --comments` and `gh pr checks $1` at every turn boundary and whenever work resumes until a background launch succeeds.
 - After launching, **return control to the user**. Pi wakes you with the result when pr-watch completes (new failure / new comment / CI settled / deadline). Do not poll or wait.
 - When it returns: if actionable, address the findings (fix the failing check, reply to the comment); then relaunch `/pr-watch $1` to keep watching the next round. If it hit the deadline with checks still running, relaunch to continue.
 - To start completely fresh (ignore the previous snapshot), add `--reset` to the task text, e.g. `/pr-watch 10230` then ask it to reset, or run `rm -rf ~/.pi/agent/pr-watch` and relaunch.
