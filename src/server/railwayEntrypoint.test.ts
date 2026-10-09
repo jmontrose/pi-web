@@ -82,6 +82,11 @@ describe("Railway entrypoint", () => {
     expect(supervisor).not.toContain("-u PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT");
     expect(instructions).toContain("A watcher is running only when the background launch returns a successful run");
     expect(instructions).toContain("check `gh pr view`");
+    expect(instructions).toContain("As a lightweight fresh-context cost trial");
+    expect(instructions).toContain("before the parent performs roughly five or");
+    expect(instructions).toContain("more searches or file reads");
+    expect(instructions).toContain("at most 12 bullets");
+    expect(instructions).toContain("inherited transcript replay defeats the point");
     expect(prompt).toContain("returns a successful background run identifier");
     expect(prompt).toContain("Never say or imply that monitoring is active after a failed launch");
     for (const managedFile of [agent, forkWorker, helper, prompt]) {

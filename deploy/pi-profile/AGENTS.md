@@ -27,6 +27,17 @@ is worth the coordination overhead. Do not delegate trivial work.
 - Keep delegated tasks narrow, state their non-goals, and require concrete
   evidence in the result.
 
+As a lightweight fresh-context cost trial, delegate a bounded read-only
+investigation to a fresh `scout` before the parent performs roughly five or
+more searches or file reads. Strong candidates are third-party implementation
+archaeology, subsystem/call-site maps, PR-comment collection and clustering,
+and mapping a diff to CI gates and exact local commands. Give each scout one
+independent question and require a compact result: at most 12 bullets, relevant
+file:line evidence, explicit uncertainty, and no raw logs or large source
+excerpts. The parent retains final judgment and should work directly when the
+briefing/coordination cost would exceed the investigation. Do not use a forked
+agent for this cost-saving path; inherited transcript replay defeats the point.
+
 # PR monitoring
 
 `pr-watch` is installed as a user agent with a `/pr-watch` prompt. Use

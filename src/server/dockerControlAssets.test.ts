@@ -87,6 +87,11 @@ describe("Docker command assets", () => {
     expect(instructions).toContain("Use `worker-fork`");
     expect(instructions).toContain("per-run model `together/zai-org/GLM-5.3`");
     expect(instructions).toContain("Model cost alone must not route consequential work to Flash");
+    expect(instructions).toContain("As a lightweight fresh-context cost trial");
+    expect(instructions).toContain("before the parent performs roughly five or");
+    expect(instructions).toContain("more searches or file reads");
+    expect(instructions).toContain("at most 12 bullets");
+    expect(instructions).toContain("inherited transcript replay defeats the point");
     expect(prWatch).toContain("model: together/zai-org/GLM-5.3-Flash");
     expect(forkWorker).toContain("name: worker-fork");
     expect(forkWorker).toContain("model: together/zai-org/GLM-5.3-Flash");
