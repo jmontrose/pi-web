@@ -33,6 +33,14 @@ describe("Railway entrypoint", () => {
     expect(instructions).toContain("ln -sfnT /var/tmp/cargo-target target");
     expect(instructions).toContain("target exists and is not a symlink");
     expect(instructions).toContain("Do not put Cargo build output on `/data`");
+    expect(instructions).toContain("`MOON_REMOTE_TOKEN` is not currently supplied");
+    expect(instructions).toContain("Use `rg` for filesystem text searches");
+    expect(instructions).toContain("`rg --hidden` when the search must include dot-directories");
+    expect(instructions).toContain("REQUIRE_NEWT=1 NEWT_CLI_BIN=");
+    expect(instructions).toContain("src/__tests__/newt-surface-parity.test.ts");
+    expect(instructions).toContain("src/__tests__/newt-sidecar-golden.test.ts");
+    expect(instructions).toContain("src/newt-differential.test.ts");
+    expect(instructions).toContain("ECONNREFUSED 10.0.0.1:443");
   });
 
   it("installs the managed PR watcher without copying runtime secrets", async () => {

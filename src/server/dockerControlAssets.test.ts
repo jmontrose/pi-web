@@ -75,6 +75,14 @@ describe("Docker command assets", () => {
     expect(instructions).not.toMatch(/chimp/i);
     expect(instructions).toContain("# Rust toolchain (this environment)");
     expect(instructions).toContain("ln -sfnT /var/tmp/cargo-target target");
+    expect(instructions).toContain("`MOON_REMOTE_TOKEN` is not currently supplied");
+    expect(instructions).toContain("Use `rg` for filesystem text searches");
+    expect(instructions).toContain("`rg --hidden` when the search must include dot-directories");
+    expect(instructions).toContain("REQUIRE_NEWT=1 NEWT_CLI_BIN=");
+    expect(instructions).toContain("src/__tests__/newt-surface-parity.test.ts");
+    expect(instructions).toContain("src/__tests__/newt-sidecar-golden.test.ts");
+    expect(instructions).toContain("src/newt-differential.test.ts");
+    expect(instructions).toContain("ECONNREFUSED 10.0.0.1:443");
     expect(instructions).toContain("by context mode, then choose the model tier per run");
     expect(instructions).toContain("Use `worker-fork`");
     expect(instructions).toContain("per-run model `together/zai-org/GLM-5.3`");

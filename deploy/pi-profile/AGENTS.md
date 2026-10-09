@@ -70,6 +70,21 @@ shells. The hosted Moon version is 2.5.5, matching Siro's current
 and report a pin mismatch rather than silently changing the repository's
 toolchain configuration.
 
+`MOON_REMOTE_TOKEN` is not currently supplied to this Railway environment.
+Moon therefore uses only its local cache; a fresh worktree can have a cold
+first build (around 95 seconds has been observed) without indicating a failure.
+Do not spend time debugging normal cold-cache behavior, and never print or
+probe the value of a cache token if one is added later.
+
+# Search discipline
+
+Use `rg` for filesystem text searches; it is installed at `/usr/bin/rg`, honors
+`.gitignore`, and avoids expensive traversal of dependency and build trees. Use
+`rg --hidden` when the search must include dot-directories such as `.github/`,
+or use `git grep` for tracked repository files. Do not use recursive `grep` over
+the repository or broad `find / ...` searches when `rg`, `git grep`,
+`command -v`, or a targeted path answers the question.
+
 # Linear
 
 Linearis is installed as the `linearis` command (with `linear` as an alias), and
@@ -116,3 +131,22 @@ it; never recursively delete an unresolved or unexpected path.
 
 Prefer package-scoped Rust checks and low build concurrency. Do not build the
 full Siro workspace or Falcon unless the task actually requires it.
+
+For Siro changes under `rust/**`, Cargo checks alone are not the parity gate.
+Build `newt-cli`, then run the two fail-closed Tea Surface suites and Copshop's
+cross-engine differential from their package directories. Setting both
+`REQUIRE_NEWT=1` and `NEWT_CLI_BIN` prevents a missing binary from turning the
+surface suites into a silent skip:
+
+```bash
+repo_root="$(git rev-parse --show-toplevel)"
+cargo build -p newt-cli
+(cd packages/tea-surface && REQUIRE_NEWT=1 NEWT_CLI_BIN="$repo_root/target/debug/newt" pnpm exec vitest run src/__tests__/newt-surface-parity.test.ts src/__tests__/newt-sidecar-golden.test.ts)
+(cd packages/copshop && NEWT_CLI_BIN="$repo_root/target/debug/newt" pnpm exec vitest run src/newt-differential.test.ts)
+```
+
+Caspercompute tests can log `QueryBatcher` connection retries for
+`ECONNREFUSED 10.0.0.1:443` in this container because the stub address is not
+routable here. If the suite retries and ultimately passes, treat those lines as
+benign environment noise; investigate only when the test fails or the final
+result changes.
