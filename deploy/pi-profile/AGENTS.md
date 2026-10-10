@@ -79,6 +79,8 @@ The Railway deployment writes a read-only storage report to
 `/data/pi-agent/STORAGE-AUDIT.md`. It refreshes shortly after each container
 wake and every 24 hours while the container remains awake. Railway serverless
 sleep pauses the timer, so always check the report's generated-at timestamp.
+The audit uses one low-priority volume walk so it does not repeatedly traverse
+large dependency trees.
 
 Use the report when investigating volume pressure or `ENOSPC`. It summarizes
 capacity and the largest persistent workspace, worktree, home, cache, and

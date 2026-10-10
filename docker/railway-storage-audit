@@ -13,6 +13,7 @@ report_tmp=""
 scan_tmp=""
 scan_errors_tmp=""
 du_pid=""
+scan_status=0
 
 cleanup_attempt() {
   [[ -z "$report_tmp" ]] || rm -f -- "$report_tmp"
@@ -57,7 +58,6 @@ append_disk_usage() {
   local path="$2"
   local depth="$3"
   local limit="$4"
-  local status=0
 
   printf '## %s\n\n' "$title"
   if [[ ! -e "$path" ]]; then
@@ -65,35 +65,27 @@ append_disk_usage() {
     return
   fi
 
-  : >"$scan_tmp"
-  du -x -k -d "$depth" "$path" >"$scan_tmp" 2>>"$scan_errors_tmp" &
-  du_pid=$!
-  if wait "$du_pid"; then
-    :
-  else
-    status=$?
-  fi
-  du_pid=""
-
   printf 'Largest paths, in KiB (bounded to %s entries; JSON-quoted paths):\n\n```text\n' "$limit"
   # shellcheck disable=SC2016
   node -e '
     const fs = require("node:fs");
     const limit = Number(process.argv[1]);
+    const prefix = process.argv[2].replace(/\/+$/, "");
+    const depth = Number(process.argv[3]);
     const rows = fs.readFileSync(0, "utf8").split("\n").filter(Boolean).map((line) => {
       const match = /^(\d+)\s+(.*)$/.exec(line);
       return match ? { size: Number(match[1]), path: match[2] } : { size: 0, path: line };
+    }).filter((row) => {
+      if (row.path === prefix) return true;
+      if (!row.path.startsWith(`${prefix}/`)) return false;
+      return row.path.slice(prefix.length + 1).split("/").length <= depth;
     });
     rows.sort((left, right) => right.size - left.size);
     for (const row of rows.slice(0, limit)) {
       process.stdout.write(`${row.size}\t${JSON.stringify(row.path)}\n`);
     }
-  ' "$limit" <"$scan_tmp" || return $?
+  ' "$limit" "$path" "$depth" <"$scan_tmp" || return $?
   printf '```\n\n'
-
-  if (( status != 0 )); then
-    printf '_This scan was incomplete; see warnings below._\n\n'
-  fi
 }
 
 write_report() {
@@ -106,8 +98,18 @@ write_report() {
   report_tmp="$(mktemp "${output_path}.tmp.XXXXXX")" || return $?
   scan_tmp="$(mktemp "${output_path}.scan.XXXXXX")" || return $?
   scan_errors_tmp="$(mktemp "${output_path}.errors.XXXXXX")" || return $?
-  generated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" || return $?
   usage_percent="$(df -Pk "$data_root" | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')" || return $?
+  : >"$scan_tmp"
+  scan_status=0
+  nice -n 19 du -l -x -k -d 5 "$data_root" >"$scan_tmp" 2>>"$scan_errors_tmp" &
+  du_pid=$!
+  if wait "$du_pid"; then
+    :
+  else
+    scan_status=$?
+  fi
+  du_pid=""
+  generated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" || return $?
 
   {
     printf '# Persistent storage audit\n\n'
@@ -127,6 +129,10 @@ write_report() {
     append_disk_usage 'Top-level persistent data' "$data_root" 1 20 || return $?
     append_disk_usage 'Workspace and worktree storage' "$workspaces_root" 4 30 || return $?
     append_disk_usage 'Persistent home storage' "$home_root" 2 30 || return $?
+
+    if (( scan_status != 0 )); then
+      printf '_The filesystem scan was incomplete; see warnings below._\n\n'
+    fi
 
     if [[ -s "$scan_errors_tmp" ]]; then
       printf '## Scan warnings\n\nWarnings are untrusted filesystem data, JSON-quoted below.\n\n```text\n'
