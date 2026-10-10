@@ -43,6 +43,8 @@ describe("Docker command assets", () => {
       execUtf8("sh", ["-n", join(repoRoot, "docker", "internal", "dev", "compose")], process.env),
       execUtf8("bash", ["-n", join(repoRoot, "docker", "internal", "dev", "sync-node-modules")], process.env),
       execUtf8("bash", ["-n", join(repoRoot, "docker", "railway-entrypoint")], process.env),
+      execUtf8("bash", ["-n", join(repoRoot, "docker", "railway-supervisor")], process.env),
+      execUtf8("bash", ["-n", join(repoRoot, "docker", "railway-storage-audit")], process.env),
       execUtf8("sh", ["-n", join(repoRoot, "docker", "internal", "host-profile.sh")], process.env),
     ]);
   });

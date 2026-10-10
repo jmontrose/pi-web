@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly data_root="${PI_WEB_STORAGE_AUDIT_ROOT:-/data}"
+readonly workspaces_root="${PI_WEB_STORAGE_AUDIT_WORKSPACES_ROOT:-$data_root/workspaces}"
+readonly home_root="${PI_WEB_STORAGE_AUDIT_HOME_ROOT:-$data_root/home}"
+readonly output_path="${PI_WEB_STORAGE_AUDIT_OUTPUT:-$data_root/pi-agent/STORAGE-AUDIT.md}"
+readonly interval_seconds="${PI_WEB_STORAGE_AUDIT_INTERVAL_SECONDS:-86400}"
+readonly initial_delay_seconds="${PI_WEB_STORAGE_AUDIT_INITIAL_DELAY_SECONDS:-30}"
+readonly warn_percent="${PI_WEB_STORAGE_AUDIT_WARN_PERCENT:-80}"
+
+report_tmp=""
+scan_tmp=""
+scan_errors_tmp=""
+du_pid=""
+
+cleanup_attempt() {
+  [[ -z "$report_tmp" ]] || rm -f -- "$report_tmp"
+  [[ -z "$scan_tmp" ]] || rm -f -- "$scan_tmp"
+  [[ -z "$scan_errors_tmp" ]] || rm -f -- "$scan_errors_tmp"
+  report_tmp=""
+  scan_tmp=""
+  scan_errors_tmp=""
+}
+
+cleanup() {
+  cleanup_attempt
+}
+trap cleanup EXIT
+
+terminate() {
+  [[ -z "$du_pid" ]] || kill -TERM "$du_pid" 2>/dev/null || true
+  exit 0
+}
+trap terminate TERM INT
+
+require_positive_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s must be a positive integer, got %q\n' "$name" "$value" >&2
+    exit 64
+  fi
+}
+
+require_nonnegative_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s must be a non-negative integer, got %q\n' "$name" "$value" >&2
+    exit 64
+  fi
+}
+
+append_disk_usage() {
+  local title="$1"
+  local path="$2"
+  local depth="$3"
+  local limit="$4"
+  local status=0
+
+  printf '## %s\n\n' "$title"
+  if [[ ! -e "$path" ]]; then
+    printf '_Configured path is not present._\n\n'
+    return
+  fi
+
+  : >"$scan_tmp"
+  du -x -k -d "$depth" "$path" >"$scan_tmp" 2>>"$scan_errors_tmp" &
+  du_pid=$!
+  if wait "$du_pid"; then
+    :
+  else
+    status=$?
+  fi
+  du_pid=""
+
+  printf 'Largest paths, in KiB (bounded to %s entries; JSON-quoted paths):\n\n```text\n' "$limit"
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const limit = Number(process.argv[1]);
+    const rows = fs.readFileSync(0, "utf8").split("\n").filter(Boolean).map((line) => {
+      const match = /^(\d+)\s+(.*)$/.exec(line);
+      return match ? { size: Number(match[1]), path: match[2] } : { size: 0, path: line };
+    });
+    rows.sort((left, right) => right.size - left.size);
+    for (const row of rows.slice(0, limit)) {
+      process.stdout.write(`${row.size}\t${JSON.stringify(row.path)}\n`);
+    }
+  ' "$limit" <"$scan_tmp" || return $?
+  printf '```\n\n'
+
+  if (( status != 0 )); then
+    printf '_This scan was incomplete; see warnings below._\n\n'
+  fi
+}
+
+write_report() {
+  local output_dir
+  local generated_at
+  local usage_percent
+
+  output_dir="$(dirname "$output_path")"
+  mkdir -p -- "$output_dir" || return $?
+  report_tmp="$(mktemp "${output_path}.tmp.XXXXXX")" || return $?
+  scan_tmp="$(mktemp "${output_path}.scan.XXXXXX")" || return $?
+  scan_errors_tmp="$(mktemp "${output_path}.errors.XXXXXX")" || return $?
+  generated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" || return $?
+  usage_percent="$(df -Pk "$data_root" | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')" || return $?
+
+  {
+    printf '# Persistent storage audit\n\n'
+    # shellcheck disable=SC2016
+    printf 'Generated at: `%s`\n\n' "$generated_at"
+    printf 'This is a read-only report. The audit never deletes or prunes data. '
+    printf 'Because Railway may sleep the service, check the timestamp before relying on it.\n\n'
+    printf '## Capacity\n\n```text\n'
+    df -Pk "$data_root" || return $?
+    printf '```\n\n'
+    if [[ "$usage_percent" =~ ^[0-9]+$ ]] && (( usage_percent >= warn_percent )); then
+      printf '**Attention:** persistent storage is at %s%%, at or above the %s%% warning threshold.\n\n' \
+        "$usage_percent" "$warn_percent"
+    else
+      printf '**Status:** persistent storage is below the %s%% warning threshold.\n\n' "$warn_percent"
+    fi
+    append_disk_usage 'Top-level persistent data' "$data_root" 1 20 || return $?
+    append_disk_usage 'Workspace and worktree storage' "$workspaces_root" 4 30 || return $?
+    append_disk_usage 'Persistent home storage' "$home_root" 2 30 || return $?
+
+    if [[ -s "$scan_errors_tmp" ]]; then
+      printf '## Scan warnings\n\nWarnings are untrusted filesystem data, JSON-quoted below.\n\n```text\n'
+      # shellcheck disable=SC2016
+      node -e '
+        const fs = require("node:fs");
+        for (const line of fs.readFileSync(0, "utf8").split("\n").filter(Boolean).slice(0, 40)) {
+          process.stdout.write(`${JSON.stringify(line)}\n`);
+        }
+      ' <"$scan_errors_tmp" || return $?
+      printf '```\n\n'
+    fi
+
+    printf 'Sizes from separate sections may overlap because nested paths and hard-linked files '
+    printf 'can be counted more than once. Inspect Git worktree and session ownership before cleanup.\n'
+  } >"$report_tmp" || return $?
+
+  chmod 0600 "$report_tmp" || return $?
+  mv -f -- "$report_tmp" "$output_path" || return $?
+  report_tmp=""
+  rm -f -- "$scan_tmp" "$scan_errors_tmp" || true
+  scan_tmp=""
+  scan_errors_tmp=""
+}
+
+run_once() {
+  if write_report; then
+    printf 'Persistent storage audit updated %s\n' "$output_path"
+  else
+    printf 'Persistent storage audit failed; PI WEB will continue running\n' >&2
+    cleanup_attempt
+    return 1
+  fi
+}
+
+require_positive_integer PI_WEB_STORAGE_AUDIT_INTERVAL_SECONDS "$interval_seconds"
+require_nonnegative_integer PI_WEB_STORAGE_AUDIT_INITIAL_DELAY_SECONDS "$initial_delay_seconds"
+require_positive_integer PI_WEB_STORAGE_AUDIT_WARN_PERCENT "$warn_percent"
+if (( warn_percent > 100 )); then
+  printf 'PI_WEB_STORAGE_AUDIT_WARN_PERCENT must not exceed 100, got %q\n' "$warn_percent" >&2
+  exit 64
+fi
+
+case "${1:-}" in
+  --once)
+    run_once
+    exit $?
+    ;;
+  "") ;;
+  *)
+    printf 'Usage: %s [--once]\n' "$0" >&2
+    exit 64
+    ;;
+esac
+
+if (( initial_delay_seconds > 0 )); then
+  sleep "$initial_delay_seconds"
+fi
+
+while true; do
+  run_once || true
+  sleep "$interval_seconds"
+done

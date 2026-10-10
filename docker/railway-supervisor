@@ -5,13 +5,16 @@ export PI_WEB_PORT="${PORT:-8080}"
 
 sessiond_pid=""
 web_pid=""
+storage_audit_pid=""
 
 # Invoked by the signal/exit trap below.
 # shellcheck disable=SC2329
 terminate() {
   trap - TERM INT EXIT
+  [[ -z "$storage_audit_pid" ]] || kill -TERM "$storage_audit_pid" 2>/dev/null || true
   [[ -z "$web_pid" ]] || kill -TERM "$web_pid" 2>/dev/null || true
   [[ -z "$sessiond_pid" ]] || kill -TERM "$sessiond_pid" 2>/dev/null || true
+  [[ -z "$storage_audit_pid" ]] || wait "$storage_audit_pid" 2>/dev/null || true
   [[ -z "$web_pid" ]] || wait "$web_pid" 2>/dev/null || true
   [[ -z "$sessiond_pid" ]] || wait "$sessiond_pid" 2>/dev/null || true
 }
@@ -42,6 +45,10 @@ fi
 
 node /opt/pi-web/dist/server/index.js &
 web_pid=$!
+
+# Keep this companion out of wait -n: a reporting failure must never take down PI WEB.
+/usr/local/bin/pi-web-railway-storage-audit &
+storage_audit_pid=$!
 
 set +e
 wait -n "$sessiond_pid" "$web_pid"

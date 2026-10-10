@@ -79,6 +79,7 @@ COPY --from=build /build/managed-agent/npm /opt/pi-web-managed-profile/npm
 COPY scripts/merge-managed-pi-profile.mjs /opt/pi-web/scripts/merge-managed-pi-profile.mjs
 COPY --chmod=0755 docker/railway-entrypoint /usr/local/bin/pi-web-railway-entrypoint
 COPY --chmod=0755 docker/railway-supervisor /usr/local/bin/pi-web-railway-supervisor
+COPY --chmod=0755 docker/railway-storage-audit /usr/local/bin/pi-web-railway-storage-audit
 
 RUN test -f /opt/pi-web/node_modules/@earendil-works/pi-coding-agent/package.json \
   && ln -sf /opt/pi-web/node_modules/.bin/pi /usr/local/bin/pi
