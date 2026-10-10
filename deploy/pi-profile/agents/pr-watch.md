@@ -79,6 +79,17 @@ Otherwise decide from these top-level keys:
 - `poll` absent, `firstWatch: true` → one-shot baseline.
 - `poll` absent, `firstWatch: false` → one-shot diff (has `summary`).
 
+`ciVisibility.source === "actions"` means the fine-grained token could not read
+the Checks API, so the helper automatically fell back to current-revision
+`pull_request`-triggered GitHub Actions workflow runs. This is working
+monitoring for those workflows (including Moon CI), but not complete visibility
+into other Actions event types or third-party/non-Actions check runs. In every
+reason-specific format below:
+
+- say **Actions** rather than all CI when describing settlement or green state;
+- append `⚠️ pull_request Actions-only visibility; other event types and non-Actions check runs are not visible.`;
+- never present the aggregate GitHub Checks state as known.
+
 ## Step 3 — return the summary (and nothing else)
 
 No preamble, no JSON, no narration of what you did, no tool output. Excerpt any
@@ -107,8 +118,10 @@ the first fetch rather than retried until deadline):
 
 PR state, reviews, and comments were fetched, but checks and Actions cannot be
 monitored with this token. The PR is not fully monitored.
-Grant the fine-grained token repository read access to Checks, Commit statuses,
-and Actions, update GH_TOKEN, then relaunch pr-watch.
+Grant the fine-grained token repository read access to Actions, update GH_TOKEN,
+then relaunch pr-watch. Fine-grained personal access tokens cannot currently be
+granted Checks permission; use a GitHub App only if full Checks visibility is
+required.
 ```
 Then report any currently readable reviews, general comments, and inline review
 comments from the JSON in the usual sections. Never describe this as active or
@@ -182,6 +195,13 @@ re-triggered CI.
 Then, ONLY if non-empty, one short line for each: now-passing checks, new checks,
 PR state changes. If everything is empty and green, add exactly:
 `All green — nothing to act on. You can stop watching or merge.`
+
+With `pull_request` Actions-only visibility, replace the header and final line with:
+```
+## PR #<n> <owner/repo> — ✅ Actions settled (polled <iterations>x over <elapsedMin>m)
+All visible pull_request Actions workflows are green — nothing to act on.
+⚠️ pull_request Actions-only visibility; other event types and non-Actions check runs are not visible.
+```
 
 **`settled-failing`** (CI finished but something is still red — pre-existing,
 not new; never say "all green"):

@@ -34,8 +34,10 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const STATE_ROOT = join(homedir(), ".pi", "agent", "pr-watch");
-const FAILURE_SET = new Set(["FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "ERROR"]);
-const RUNNING_SET = new Set(["IN_PROGRESS", "QUEUED", "WAITING", "PENDING"]);
+const FAILURE_SET = new Set([
+  "FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "CANCELLED", "STALE", "STARTUP_FAILURE",
+]);
+const RUNNING_SET = new Set(["IN_PROGRESS", "QUEUED", "WAITING", "PENDING", "REQUESTED"]);
 const MAX_EXCERPT = 280;
 const DEFAULT_INTERVAL_SEC = 60;
 const DEFAULT_DEADLINE_SEC = 2100; // 35m — covers a 30m moon-ci run + buffer
@@ -203,6 +205,33 @@ function ghApiList(path0) {
   return out;
 }
 
+// Paginate the Actions workflow-runs envelope. Unlike review/comment endpoints,
+// this endpoint returns { total_count, workflow_runs } instead of a top-level
+// array, so it needs its own explicit boundary.
+function ghActionsRuns(path0) {
+  let out = [];
+  let page = 1;
+  for (;;) {
+    const sep = path0.includes("?") ? "&" : "?";
+    const p = `${path0}${sep}per_page=100&page=${page}`;
+    let body;
+    try {
+      body = JSON.parse(gh(["api", p]));
+    } catch (e) {
+      throw new Error(`gh api ${p} failed: ${e.message}`);
+    }
+    const runs = body?.workflow_runs;
+    if (!Array.isArray(runs)) {
+      throw new Error(`gh api ${p} returned no workflow_runs array`);
+    }
+    out = out.concat(runs);
+    if (runs.length < 100) break;
+    page++;
+    if (page > 20) break;
+  }
+  return out;
+}
+
 function statePaths(owner, name, pr, stateRoot = STATE_ROOT) {
   const dir = join(stateRoot, `${owner}__${name}`);
   return { dir, file: join(dir, `${pr}.json`) };
@@ -251,6 +280,60 @@ function mapChecks(statusCheckRollup) {
   });
 }
 
+function normalizeActionsValue(value) {
+  return value == null ? null : String(value).replaceAll("-", "_").toUpperCase();
+}
+
+// Convert current-revision Actions workflow runs to the existing check shape so
+// polling, snapshot diffing, and failure wake policy remain shared. The caller
+// supplies runs already filtered by GitHub to the PR head SHA; retain local
+// immutable-SHA and PR-number checks so a stale or unrelated payload can never
+// settle this PR. Historical runs can expose the PR's *current* nested head
+// metadata, so the nested head SHA is not sufficient evidence by itself.
+export function mapActionsRuns(workflowRuns, { pr, headRefOid }) {
+  const current = new Map();
+  for (const run of workflowRuns || []) {
+    const pullRequestMatch = (run.pull_requests || []).some((item) => item?.number === pr);
+    if (!pullRequestMatch || run.head_sha !== headRefOid) continue;
+
+    const id = run.id;
+    if (id == null) continue;
+    const previous = current.get(id);
+    if (previous && Number(previous.run_attempt || 0) > Number(run.run_attempt || 0)) continue;
+    current.set(id, run);
+  }
+
+  return [...current.values()].map((run) => ({
+    key: `gha|${run.id}`,
+    name: run.name || run.workflow_name || run.path || "unknown",
+    typename: "ActionsWorkflowRun",
+    status: normalizeActionsValue(run.status),
+    conclusion: normalizeActionsValue(run.conclusion),
+    startedAt: run.run_started_at || run.created_at || null,
+    completedAt: run.status === "completed" ? run.updated_at || null : null,
+    link: run.html_url || null,
+    workflowName: run.name || run.workflow_name || null,
+    workflowPath: run.path || null,
+  }));
+}
+
+function isMoonCi(check) {
+  return (
+    /(?:^|\/)moon-ci\.ya?ml(?:@|$)/i.test(check.workflowPath || "") ||
+    check.name === "moon-ci" ||
+    /moon[- ]?ci/i.test(check.workflowName || "")
+  );
+}
+
+// Siro treats Moon CI as a required PR workflow, so seeing only a faster
+// workflow is not enough evidence that Actions registration has settled. Keep
+// that repository policy out of the generic watcher path: other repositories
+// may not have a Moon workflow at all and should settle after the normal
+// two-poll Actions stability window.
+function requiresMoonCi(slug) {
+  return slug.toLowerCase() === "airelabsresearch/siro";
+}
+
 // Fetch the PR, build the snapshot, diff against prev, write snapshot, and
 // return the result object (baseline or diff). Does NOT emit.
 function buildResult(args, deps = {}) {
@@ -259,6 +342,7 @@ function buildResult(args, deps = {}) {
   const { dir, file } = statePaths(owner, name, pr, deps.stateRoot || STATE_ROOT);
   const fetchJson = deps.ghJson || ghJson;
   const fetchApiList = deps.ghApiList || ghApiList;
+  const fetchActionsRuns = deps.ghActionsRuns || ghActionsRuns;
 
   let meta;
   try {
@@ -283,12 +367,41 @@ function buildResult(args, deps = {}) {
     if (!isAuthorizationError(e)) {
       throw new Error(`failed to fetch PR ${pr} checks in ${slug}: ${e.message}`);
     }
-    ciVisibility = {
-      available: false,
-      reason: "insufficient-permissions",
-      message:
-        "GitHub denied CI check data. Reviews and comments were fetched, but this token cannot monitor checks or Actions.",
-    };
+    try {
+      const workflowRuns = fetchActionsRuns(
+        `repos/${slug}/actions/runs?event=pull_request&head_sha=${encodeURIComponent(meta.headRefOid)}`,
+      );
+      checks = mapActionsRuns(workflowRuns, { pr, headRefOid: meta.headRefOid });
+      const moonCiRequired = requiresMoonCi(slug);
+      ciVisibility = {
+        available: true,
+        source: "actions",
+        coverage: "pull-request-actions-only",
+        complete: false,
+        currentRunsFound: checks.length > 0,
+        moonCiRequired,
+        moonCiObserved: checks.some(isMoonCi),
+        reason: "checks-unavailable-actions-fallback",
+        message:
+          "GitHub denied Checks data. Current-revision pull_request Actions workflows are monitored; other event types and non-Actions check runs are not visible.",
+      };
+    } catch (actionsError) {
+      if (!isAuthorizationError(actionsError)) {
+        throw new Error(
+          `failed to fetch PR ${pr} Actions fallback in ${slug}: ${actionsError.message}`,
+        );
+      }
+      ciVisibility = {
+        available: false,
+        source: null,
+        coverage: "none",
+        complete: false,
+        currentRunsFound: false,
+        reason: "insufficient-permissions",
+        message:
+          "GitHub denied both Checks and Actions data. Reviews and comments were fetched, but CI cannot be monitored.",
+      };
+    }
   }
 
   let reviews, issueComments, reviewComments;
@@ -355,6 +468,13 @@ function buildResult(args, deps = {}) {
   const runningChecks = checks.filter((c) => RUNNING_SET.has(c.status));
   const failingChecks = checks.filter((c) => c.conclusion && FAILURE_SET.has(c.conclusion));
   const passingChecks = checks.filter((c) => c.conclusion === "SUCCESS");
+  const missingCurrentActions =
+    ciVisibility.source === "actions" &&
+    (ciVisibility.currentRunsFound === false ||
+      (ciVisibility.moonCiRequired === true && ciVisibility.moonCiObserved === false));
+  const missingCurrentActionsMessage = ciVisibility.currentRunsFound === false
+    ? "Current-revision Actions runs have not appeared yet"
+    : "Moon CI has not appeared for the current revision yet";
 
   // --- first watch: baseline, no diff ---
   if (!prev) {
@@ -373,8 +493,12 @@ function buildResult(args, deps = {}) {
       currentFailures: failingChecks.map((c) => ({
         name: c.name, workflow: c.workflowName, conclusion: c.conclusion, link: c.link,
       })),
-      runningChecks: runningChecks.map((c) => c.name),
-      allTerminal: ciVisibility.available && runningChecks.length === 0,
+      runningChecks: [
+        ...runningChecks.map((c) => c.name),
+        ...(missingCurrentActions ? [missingCurrentActionsMessage] : []),
+      ],
+      allTerminal: ciVisibility.available && !missingCurrentActions && runningChecks.length === 0,
+      moonCiFailing: failingChecks.some(isMoonCi),
       // GitHub reports mergeable="CONFLICTING" when the head and base have
       // merge conflicts. Surface it so the parent can rebase immediately
       // instead of waiting on CI that may be red downstream of the conflict.
@@ -452,6 +576,14 @@ function buildResult(args, deps = {}) {
       diff.stillRunning.push({ name: c.name, workflow: c.workflowName, status: c.status, link: c.link });
     }
   }
+  if (missingCurrentActions) {
+    diff.stillRunning.push({
+      name: missingCurrentActionsMessage,
+      workflow: null,
+      status: "MISSING",
+      link: null,
+    });
+  }
 
   const prevReviewIds = new Set((prev.reviews || []).map((r) => r.id));
   for (const r of snapshot.reviews)
@@ -473,16 +605,14 @@ function buildResult(args, deps = {}) {
       diff.editedComments.push({ kind: "review", id: c.id, user: c.user, bot: c.bot, path: c.path, line: c.line, body: c.body, link: c.htmlUrl, updatedAt: c.updatedAt });
   }
 
-  diff.allTerminal = ciVisibility.available && diff.stillRunning.length === 0;
+  diff.allTerminal = ciVisibility.available && !missingCurrentActions && diff.stillRunning.length === 0;
   // Surface ALL currently-failing checks (not just new ones) so a pre-existing
   // red — especially moon-ci — is reported on re-watch instead of "all green",
   // and so moon-ci can short-circuit an immediate return (see classify).
   diff.currentFailures = failingChecks.map((c) => ({
     name: c.name, workflow: c.workflowName, conclusion: c.conclusion, link: c.link,
   }));
-  diff.moonCiFailing = failingChecks.some(
-    (c) => c.name === "moon-ci" || /moon[- ]?ci/i.test(c.workflowName || "")
-  );
+  diff.moonCiFailing = failingChecks.some(isMoonCi);
   diff.heresyFailing = failingChecks.some(
     (c) => /heresy/i.test(c.name || "") || /heresy/i.test(c.workflowName || "")
   );
@@ -562,16 +692,21 @@ function classify(res) {
     // A merge conflict is the cleanest first thing to surface on a fresh
     // watch: rebasing is cheap, fast, and often the root cause of red CI.
     if (res.mergeConflict) return "merge-conflict";
+    if (res.moonCiFailing) return "moon-ci-failing";
     if (res.currentFailures && res.currentFailures.length) return "baseline-failing";
+    // The Actions API can expose one fast workflow before the rest of the PR
+    // workflows have registered. Require one more poll before declaring an
+    // Actions-only baseline settled; failures still wake immediately above.
+    if (res.allTerminal && res.ciVisibility?.source === "actions") return null;
     if (res.allTerminal) return "settled"; // nothing running and nothing failing
     return null; // CI still running, no failures yet — keep watching
   }
-  if (res.summary.actionable > 0) return "actionable";
   // A merge conflict (new or pre-existing) short-circuits immediately —
   // rebasing unblocks everything downstream and is cheaper than waiting on CI.
   if (res.mergeConflict) return "merge-conflict";
   // moon-ci red always short-circuits, new or pre-existing.
   if (res.moonCiFailing) return "moon-ci-failing";
+  if (res.summary.actionable > 0) return "actionable";
   if (res.allTerminal) {
     // CI finished. Distinguish green from "settled on a pre-existing failure"
     // so the parent never reads "all green" when something is actually red.

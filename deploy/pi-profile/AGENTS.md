@@ -51,8 +51,19 @@ identifier. If it throws, reports that background children are unavailable, or
 otherwise fails to return a run identifier, say so prominently in the same
 turn; never imply that the PR is being monitored. Foreground subagents still
 work in that failure mode. Until background launch succeeds, check `gh pr view`
-and `gh pr checks` at every turn boundary and whenever work resumes so review
-comments or CI failures do not sit unnoticed.
+and the readable CI surface at every turn boundary and whenever work resumes so
+review comments or CI failures do not sit unnoticed. Try `gh pr checks` first;
+if GitHub denies Checks, use current-head `pull_request` Actions runs.
+
+GitHub fine-grained personal access tokens do not currently expose the Checks
+permission. When `statusCheckRollup` is denied but Actions read access works,
+`pr-watch` automatically monitors current-revision Actions workflow runs and
+can detect Moon CI failures. Treat that as `pull_request` Actions-only
+visibility: it cannot prove the state of other Actions event types, third-party
+checks, or other non-Actions check runs, and it must never call missing
+current-revision workflow runs green. In `airelabsresearch/siro`, Moon CI is a
+required workflow and the watcher waits for it to appear before settlement. A
+total Actions access failure remains a hard `ci-unavailable` result.
 
 The hosted environment may not have every repository tool installed. Follow
 project instructions, but never claim an unavailable build, lint, or test gate

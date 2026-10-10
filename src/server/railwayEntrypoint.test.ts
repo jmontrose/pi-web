@@ -268,7 +268,12 @@ describe("Railway entrypoint", () => {
     expect(helper).toContain("realpathSync(fileURLToPath(moduleUrl))");
     expect(agent).toContain("ci-unavailable");
     expect(agent).toContain("The PR is not fully monitored");
+    expect(agent).toContain("Actions-only visibility");
+    expect(agent).toContain("other event types and non-Actions check runs are not visible");
+    expect(agent).toContain("Fine-grained personal access tokens cannot currently");
     expect(helper).toContain('reason: "insufficient-permissions"');
+    expect(helper).toContain('source: "actions"');
+    expect(helper).toContain('coverage: "pull-request-actions-only"');
     expect(helper).toContain('return "ci-unavailable"');
     expect(prompt).toContain('agent: \\"pr-watch\\"');
     expect(dockerfile).toContain(
